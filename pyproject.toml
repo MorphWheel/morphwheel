@@ -1,0 +1,119 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "morphwheel"
+dynamic = ["version"]
+description = "Shift-drag a file in Windows File Explorer, drop it on a radial wheel, get it converted."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Morphwheel contributors" }]
+keywords = ["windows", "file-converter", "drag-and-drop", "radial-menu", "pie-menu", "explorer"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+]
+# Runtime dependencies are pinned exactly: the installer ships these versions (phase-4 §7).
+dependencies = [
+    "PySide6-Essentials==6.12.0",
+    "Pillow==13.0.0",
+    "platformdirs==4.13.4",
+    "tomli-w==1.2.0",
+]
+
+[project.optional-dependencies]
+# HEIC support is an opt-in download at runtime (decision A6). pillow-heif wheels are GPLv2
+# because they bundle x265, so it must NEVER be bundled into the installer. This extra exists
+# only so developers can run the HEIC tests locally.
+heic = ["pillow-heif==1.8.1"]
+dev = [
+    "pytest==9.1.1",
+    "pytest-qt==4.5.0",
+    "ruff==0.17.1",
+    "mypy==2.4.0",
+    "import-linter==2.15",
+    "pyinstaller==6.22.3",
+]
+
+[project.gui-scripts]
+morphwheel = "morphwheel.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/morphwheel/morphwheel"
+Issues = "https://github.com/morphwheel/morphwheel/issues"
+
+# --------------------------------------------------------------------------- build
+[tool.hatch.version]
+path = "src/morphwheel/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/morphwheel"]
+
+# --------------------------------------------------------------------------- lint / format
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests", "tools"]
+# Code blocks in the Markdown specs are draft contracts, not code to lint or format.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "PT", "N", "C4", "PTH"]
+
+[tool.ruff.lint.per-file-ignores]
+# Qt event handlers (dragEnterEvent, paintEvent…) and Win32 struct fields (cbSize…) keep their
+# upstream names.
+"src/morphwheel/ui/**" = ["N802"]
+"src/morphwheel/platform/**" = ["N801", "N802", "N815"]
+"tools/**" = ["N801", "N802", "N815"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["morphwheel"]
+
+# --------------------------------------------------------------------------- types
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["morphwheel"]
+strict = true
+warn_unreachable = true
+
+# --------------------------------------------------------------------------- tests
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+qt_api = "pyside6"
+markers = [
+    "integration: spawns worker processes or runs real conversions (slower)",
+]
+
+# --------------------------------------------------------------------------- import boundaries
+# phase-4 §1 (R1–R5). Contracts for modules that don't exist yet are added in the sprint that
+# creates them (worker_main and plugins.api in S3; ui → worker_pool in S3).
+[tool.importlinter]
+root_package = "morphwheel"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "R1: core is pure (no Qt, no ctypes/Win32, no other Morphwheel layer)"
+type = "forbidden"
+source_modules = ["morphwheel.core"]
+forbidden_modules = [
+    "PySide6",
+    "ctypes",
+    "morphwheel.app",
+    "morphwheel.engine",
+    "morphwheel.logs",
+    "morphwheel.platform",
+    "morphwheel.plugins",
+    "morphwheel.settings",
+    "morphwheel.ui",
+]

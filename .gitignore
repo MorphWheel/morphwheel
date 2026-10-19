@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Tool caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.import_linter_cache/
+.coverage
+htmlcov/
+
+# Build output (PyInstaller / Inno Setup / wheels)
+build/
+dist/
+packaging/output/
+
+# Logs and local runtime data
+*.log
+logs/
+
+# OS / editors
+Thumbs.db
+desktop.ini
+.DS_Store
+.idea/
