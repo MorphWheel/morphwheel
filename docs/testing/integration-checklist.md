@@ -31,7 +31,7 @@ by hand at the end of every sprint, and it grows as features land. Results go in
 | C6 | Title bar / tab drag *(spike test 6)* | Drag an Explorer window by its title bar or a tab while pressing Shift | `source_ok=False`, **no** `SHOW` | S0 |
 | C7 | No Shift | Drag a file without Shift and drop it back in the same folder | No `SHOW` | S0 |
 | C8 | Esc | Shift-drag until the overlay shows, then press Esc and release | `esc` logged, drag cancelled by Explorer, no `DROP`, file unchanged | S0 |
-| C9 | Elevated window | Open PowerShell **as administrator**. Click into it and move or click the mouse. Then do C1 with that window open | Shows whether `down`/`up` lines still appear while the elevated window is in front (record the answer). C1 still passes. | S0 |
+| C9 | Elevated window | Open PowerShell **as administrator**. Click into it and move or click the mouse. Then do C1 with that window open | Shows whether `down`/`up` lines still appear while the elevated window is in front (record the answer). The `FG` line, logged 300 ms after `SHOW`, names the foreground window and whether it is elevated. C1 still passes. | S0 |
 | C10 | Multiple monitors *(if available)* | Do C1 on each monitor, including one with different scaling | `SHOW … screen=<that monitor>`, and the overlay is centered on the cursor | S0 |
 | C11 | Local console timing | Do C1 and C2 **at the physical machine** (not over RDP) | Compare `ENTER` latency with the RDP numbers (9–51 ms in the spike) | S0 |
 | C12 | Frozen build | Do C1 with `drag_probe.exe` | Same as C1 | S0 |

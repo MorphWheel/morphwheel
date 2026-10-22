@@ -11,6 +11,8 @@ Build from the repo root::
         --distpath packaging\\output\\dist --workpath packaging\\output\\build
 """
 
+import os
+import sys
 from pathlib import Path
 
 HERE = Path(SPECPATH).resolve()  # noqa: F821 - SPECPATH is injected by PyInstaller
@@ -53,18 +55,34 @@ a = Analysis(  # noqa: F821
 )
 
 # Native files Morphwheel never uses (S0 audit, ~28 MB). The wheel paints with QPainter's raster
-# engine, images go through Pillow, and Qt makes no TLS connections. Python's own OpenSSL
-# (libssl/libcrypto-3-x64) stays, because the opt-in HEIC download (A6) uses urllib over HTTPS.
-DROP_FILES = {"opengl32sw.dll", "libcrypto-3.dll", "libssl-3.dll", "qdirect2d.dll"}
+# engine, images go through Pillow, and Qt makes no TLS connections. The "-3-x64" OpenSSL pair is
+# whatever copy PyInstaller found on PATH for Qt's TLS backend (Git's MinGW build on the dev box),
+# and nothing else imports it.
+DROP_FILES = {"opengl32sw.dll", "libcrypto-3-x64.dll", "libssl-3-x64.dll", "qdirect2d.dll"}
 DROP_DIRS = ("plugins/tls/", "plugins/imageformats/", "plugins/generic/", "plugins/networkinformation/")
+
+# Python's own OpenSSL must stay: the frozen _ssl.pyd and _hashlib.pyd import exactly these, and the
+# opt-in HEIC download (A6) uses urllib over HTTPS. Other copies with the same names are on PATH, so
+# the build also checks that they come from this interpreter (RF-1).
+PYTHON_OPENSSL = ("libcrypto-3.dll", "libssl-3.dll")
+PYTHON_DLLS = os.path.normcase(os.path.realpath(os.path.join(sys.base_prefix, "DLLs")))
+
+
+def _name(dest: str) -> str:
+    return dest.replace("\\", "/").rsplit("/", 1)[-1].lower()
 
 
 def _keep(dest: str) -> bool:
     dest = dest.replace("\\", "/")
-    return dest.rsplit("/", 1)[-1].lower() not in DROP_FILES and not any(d in dest for d in DROP_DIRS)
+    return _name(dest) not in DROP_FILES and not any(d in dest for d in DROP_DIRS)
 
 
 a.binaries = [b for b in a.binaries if _keep(b[0])]
+
+for dll in PYTHON_OPENSSL:
+    sources = [src for dest, src, _ in a.binaries if _name(dest) == dll]
+    if [os.path.normcase(os.path.realpath(os.path.dirname(s))) for s in sources] != [PYTHON_DLLS]:
+        raise SystemExit(f"morphwheel.spec: bundle {dll} once, from {PYTHON_DLLS}; got {sources}")
 
 pyz = PYZ(a.pure)  # noqa: F821
 exe = EXE(  # noqa: F821
