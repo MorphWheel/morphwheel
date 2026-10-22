@@ -11,8 +11,11 @@ on:
 permissions:
   contents: read
 
+# A newer run in a group cancels the group's pending run, and here also its running one. So only
+# pull requests share a group (a new push supersedes the old one). Every other run gets its own
+# group, and each commit to main keeps its CI result.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
