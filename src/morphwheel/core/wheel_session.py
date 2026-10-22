@@ -11,7 +11,8 @@ Rules:
   edge the wheel is shifted, and the cursor may start on a slot.
 - **U3, More arc.** It opens after a ``MORE_DWELL_NS`` hover on the More slot, or immediately when
   the pointer pushes outward through it. It closes when the pointer returns to the hub or to
-  another slot.
+  another slot. A drop never opens or closes it: ``decide_drop`` uses the arc as last shown, while
+  the drop point still counts toward arming (RD-1).
 - **Waiting.** Until DragEnter supplies a plan, the hub shows a spinner after
   ``SPINNER_AFTER_NS`` and gives up after ``GIVE_UP_AFTER_NS`` (phase-3 §4).
 - **C5.** The hub repeats the hovered target, because Explorer's drag thumbnail covers the slot
@@ -131,12 +132,7 @@ class WheelSession:
         return self._view()
 
     def on_pointer(self, p: Point, t_ns: int) -> SessionView:
-        self._pointer, self._now = p, t_ns
-        if (
-            not self._armed
-            and math.dist((p.x, p.y), (self._appear_at.x, self._appear_at.y)) >= ARMING_DISTANCE
-        ):
-            self._armed = True
+        self._move(p, t_ns)
         self._update_more()
         view = self._view()
         self._prev_region = view.region
@@ -149,7 +145,14 @@ class WheelSession:
         return self._view()
 
     def decide_drop(self, p: Point, t_ns: int) -> Accept | Cancel:
-        view = self.on_pointer(p, t_ns)
+        """The final call, on the More state the user last saw.
+
+        The drop point still counts toward arming (U7 is about distance). The More arc doesn't
+        open or close here, so a drop can't pick an arc item that was never shown (RD-1).
+        """
+        self._move(p, t_ns)
+        view = self._view()
+        self._prev_region = view.region
         if view.accepts_drop and view.hover is not None and view.hover.target is not None:
             return Accept(view.hover.target, view.hover.skip_count)
         if self.plan is None:
@@ -165,6 +168,14 @@ class WheelSession:
         return Cancel(CancelReason.DISABLED)
 
     # ----------------------------------------------------------------- internals
+    def _move(self, p: Point, t_ns: int) -> None:
+        self._pointer, self._now = p, t_ns
+        if (
+            not self._armed
+            and math.dist((p.x, p.y), (self._appear_at.x, self._appear_at.y)) >= ARMING_DISTANCE
+        ):
+            self._armed = True
+
     def _more_available(self) -> bool:
         return self.plan is not None and self.plan.ok and self.plan.slots[MORE_SLOT].enabled
 

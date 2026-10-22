@@ -171,6 +171,13 @@ def test_release_grace_timeout() -> None:
     assert not machine.wheel_visible
 
 
+def test_an_unknown_event_is_an_error_not_a_tick() -> None:
+    """RF-12: an event type the machine doesn't handle must fail loudly, not pass as a Tick."""
+    machine = GestureMachine()
+    with pytest.raises(AssertionError):
+        machine.feed(object())  # type: ignore[arg-type]
+
+
 def test_polling_only_during_a_gesture() -> None:
     machine = GestureMachine()
     assert not machine.wants_polling

@@ -6,6 +6,7 @@ Traceability (phase-4 §6): "source disabled, mixed-drag skip, incompatible" →
 
 from __future__ import annotations
 
+import copy
 import pickle
 from pathlib import Path
 
@@ -173,6 +174,34 @@ def test_target_validation() -> None:
         Target("a", "A", TargetKind.COMPRESS, F.PNG, frozenset(), "p")
 
 
+def test_plain_string_fields_are_coerced_to_enums() -> None:
+    """RF-4: manifests (S3) deliver plain strings, and the core compares enums by identity."""
+    raw = Target("tif", "TIFF", "convert", "tiff", ["png", "tiff"], "com.x")  # type: ignore[arg-type]
+    assert raw.kind is TargetKind.CONVERT
+    assert raw.output_format is F.TIFF
+    assert raw.accepts == frozenset({F.PNG, F.TIFF})
+    assert all(type(fmt) is FormatId for fmt in raw.accepts)
+    assert Catalog.classify(f("a.tiff"), raw) is Verdict.SKIP
+    slotted = Target("j", "J", "convert", "jpeg", frozenset({"png"}), "b", True, "n")  # type: ignore[arg-type]
+    assert slotted.slot is SlotPos.N
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        ("transmogrify", "png", frozenset(), None),  # unknown kind
+        ("convert", "jpg2", frozenset(), None),  # unknown output format
+        ("convert", "png", frozenset({"jpg2"}), None),  # unknown input format
+        ("convert", "png", frozenset(), "up"),  # unknown slot
+        ("convert", None, frozenset(), None),  # still validated after coercion
+    ],
+)
+def test_bad_plain_string_fields_are_rejected(fields: tuple[object, ...]) -> None:
+    kind, out, accepts, slot = fields
+    with pytest.raises(ValueError, match=r"is not a valid|output format"):
+        Target("x", "X", kind, out, accepts, "p", True, slot)  # type: ignore[arg-type]
+
+
 def test_classify(catalog: Catalog) -> None:
     jpeg, compress = BUILTINS[0], BUILTINS[4]
     assert catalog.classify(f("a.png"), jpeg) is Verdict.CONVERT
@@ -211,15 +240,40 @@ def _result(status: TaskStatus, error: ErrorCode | None = None, intact: bool = T
             JobOutcome.FAILED,
         ),
         ([_result(TaskStatus.OK), _result(TaskStatus.OK, intact=False)], JobOutcome.SOURCE_CHANGED),
+        # RF-5: "already compact" is not a failure (phase-3 §5 shows it with ✓)
+        (
+            [_result(TaskStatus.OK), _result(TaskStatus.FAILED, ErrorCode.NOT_SMALLER)],
+            JobOutcome.SUCCESS,
+        ),
+        (
+            [
+                _result(TaskStatus.OK),
+                _result(TaskStatus.FAILED, ErrorCode.NOT_SMALLER),
+                _result(TaskStatus.FAILED, ErrorCode.UNREADABLE),
+            ],
+            JobOutcome.PARTIAL,
+        ),
     ],
 )
 def test_job_outcome(statuses: list[TaskResult], outcome: JobOutcome) -> None:
     assert JobResult("j", BUILTINS[0], tuple(statuses)).outcome is outcome
 
 
+def test_already_compact_is_counted_apart_from_failures() -> None:
+    compact = _result(TaskStatus.FAILED, ErrorCode.NOT_SMALLER)
+    broken = _result(TaskStatus.FAILED, ErrorCode.UNREADABLE)
+    job = JobResult("j", BUILTINS[4], (_result(TaskStatus.OK), compact, broken))
+    assert job.already_compact == (compact,)
+    assert job.failed == (broken,)
+
+
+def _task(options: dict[str, object]) -> Task:
+    return Task("j", 1, Path(r"C:\x\a.png"), BUILTINS[4], Path(r"C:\dl"), options)
+
+
 def test_job_types_survive_pickling() -> None:
     """They cross a spawn boundary (A5)."""
-    task = Task("j", 1, Path(r"C:\x\a.png"), BUILTINS[4], Path(r"C:\dl"), {"quality": 80})
+    task = _task({"quality": 80})
     created = CreatedFile(Path(r"C:\x\a (compressed).png"), 10, 123, task.source)
     result = TaskResult("j", 1, task.source, TaskStatus.OK, output=created, duration_ms=1.5)
     job = JobResult("j", task.target, (result,))
@@ -228,3 +282,18 @@ def test_job_types_survive_pickling() -> None:
     assert job.outputs == (created,)
     assert job.ok_count == 1
     assert job.skipped_count == 0
+
+
+def test_task_options_are_read_only_and_task_is_hashable() -> None:
+    """RF-10: a frozen Task must hash, and its options must not change under it."""
+    options: dict[str, object] = {"quality": 80}
+    task = _task(options)
+    options["quality"] = 10  # the caller's dict is copied, not shared
+    assert task.options == {"quality": 80}
+    with pytest.raises(TypeError):
+        task.options["quality"] = 10  # type: ignore[index]
+    assert hash(task) == hash(_task({"quality": 80}))
+    for clone in (pickle.loads(pickle.dumps(task)), copy.copy(task), copy.deepcopy(task)):
+        assert clone == task
+        with pytest.raises(TypeError):
+            clone.options["quality"] = 10  # type: ignore[index]

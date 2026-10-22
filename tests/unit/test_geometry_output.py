@@ -134,24 +134,47 @@ COMPRESS = Target(
 
 
 def test_convert_candidates() -> None:
-    names = [p.name for p in islice(candidate_paths(Path(r"C:\x\photo.png"), JPEG), 3)]
+    src = Path(r"C:\x\photo.png")
+    names = [p.name for p in islice(candidate_paths(src, JPEG, source_format=FormatId.PNG), 3)]
     assert names == ["photo.jpg", "photo (1).jpg", "photo (2).jpg"]
-    assert len(list(candidate_paths(Path(r"C:\x\photo.png"), JPEG))) == MAX_COLLISION_SUFFIX + 1
+    everything = list(candidate_paths(src, JPEG, source_format=FormatId.PNG))
+    assert len(everything) == MAX_COLLISION_SUFFIX + 1
 
 
-def test_compress_keeps_the_source_extension() -> None:
-    first = next(candidate_paths(Path(r"C:\x\Photo.JPG"), COMPRESS))
-    assert first == Path(r"C:\x\Photo (compressed).JPG")
+@pytest.mark.parametrize(
+    ("name", "detected", "expected"),
+    [
+        ("Photo.JPG", FormatId.JPEG, "Photo (compressed).JPG"),  # the source's own spelling
+        ("photo.jpeg", FormatId.JPEG, "photo (compressed).jpeg"),
+        ("photo", FormatId.JPEG, "photo (compressed).jpg"),  # RF-3: no extension
+        ("a.png", FormatId.JPEG, "a (compressed).jpg"),  # RF-3: mislabeled, the bytes decide
+        ("Photo.JPG", None, "Photo (compressed).JPG"),  # not sniffed: the name is all we have
+    ],
+)
+def test_compress_extension_follows_the_detected_format(
+    name: str, detected: FormatId | None, expected: str
+) -> None:
+    first = next(candidate_paths(Path(r"C:\x") / name, COMPRESS, source_format=detected))
+    assert first == Path(r"C:\x") / expected
+
+
+def test_a_dot_that_is_not_an_extension_stays_in_the_name() -> None:
+    src = Path(r"C:\x\Dr. Who")  # a PNG with no extension: ". Who" is part of the name
+    assert next(candidate_paths(src, COMPRESS, source_format=FormatId.PNG)).name == (
+        "Dr. Who (compressed).png"
+    )
+    assert next(candidate_paths(src, JPEG, source_format=FormatId.PNG)).name == "Dr. Who.jpg"
 
 
 def test_never_proposes_the_source_itself() -> None:
     really_png = Path(r"C:\x\A.JPG")  # extension says JPEG, bytes say PNG; target is JPEG
-    first = next(candidate_paths(really_png, JPEG))
+    first = next(candidate_paths(really_png, JPEG, source_format=FormatId.PNG))
     assert first == Path(r"C:\x\A (1).jpg")
 
 
 def test_candidates_in_another_directory() -> None:
-    first = next(candidate_paths(Path(r"C:\ro\photo.png"), JPEG, Path(r"C:\dl\Morphwheel")))
+    src, elsewhere = Path(r"C:\ro\photo.png"), Path(r"C:\dl\Morphwheel")
+    first = next(candidate_paths(src, JPEG, elsewhere, source_format=FormatId.PNG))
     assert first == Path(r"C:\dl\Morphwheel\photo.jpg")
 
 

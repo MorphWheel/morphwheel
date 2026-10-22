@@ -63,6 +63,15 @@ class Target:
     slot: SlotPos | None = None  # honored only when is_builtin
 
     def __post_init__(self) -> None:
+        # Manifests (S3) deliver plain strings, and the core compares enums with ``is``: coerce
+        # first, which also rejects unknown values (ValueError).
+        coerce = object.__setattr__
+        coerce(self, "kind", TargetKind(self.kind))
+        if self.output_format is not None:
+            coerce(self, "output_format", FormatId(self.output_format))
+        coerce(self, "accepts", frozenset(FormatId(f) for f in self.accepts))
+        if self.slot is not None:
+            coerce(self, "slot", SlotPos(self.slot))
         if self.kind is TargetKind.CONVERT and self.output_format is None:
             raise ValueError(f"convert target {self.id!r} needs an output format")
         if self.kind is TargetKind.COMPRESS and self.output_format is not None:

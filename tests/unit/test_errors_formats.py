@@ -6,6 +6,7 @@ Real image bytes are produced with Pillow (a test dependency; core itself never 
 from __future__ import annotations
 
 import io
+import struct
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,24 @@ def test_sniff_truncated_animated_gif_is_unknown_or_animated() -> None:
     assert sniff(first_frame_only).animated in (None, True)
 
 
-@pytest.mark.parametrize("junk", [b"", b"hello world", b"\x00" * 64, b"RIFF\x00\x00\x00\x00AVI "])
+@pytest.mark.parametrize(
+    "junk",
+    [
+        b"",
+        b"hello world",
+        b"\x00" * 64,
+        b"RIFF\x00\x00\x00\x00AVI ",
+        b"BMW 3 Series price list, 2026 edition\r\n",  # RF-14: "BM" alone is not a bitmap
+        b"BM" + b"\x00" * 30,
+        b"BM" + b"\x00" * 10,  # too short for a DIB header
+    ],
+)
 def test_sniff_unknown(junk: bytes) -> None:
     assert sniff(junk) == Sniff(None, None)
+
+
+@pytest.mark.parametrize("dib_header_size", [12, 40, 52, 56, 64, 108, 124])
+def test_sniff_bmp_by_its_dib_header(dib_header_size: int) -> None:
+    """The DIB header sizes Pillow's BMP reader accepts: OS/2 v1 up to BITMAPV5HEADER."""
+    header = b"BM" + struct.pack("<IHHII", 1000, 0, 0, 14 + dib_header_size, dib_header_size)
+    assert sniff(header + b"\x00" * 64) == Sniff(FormatId.BMP, False)
