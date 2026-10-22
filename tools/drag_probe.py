@@ -9,8 +9,9 @@ Modes
     docs/testing/integration-checklist.md.
 ``measure``
     Measures the runtime: GUI idle memory, worker cold start (spawn), worker memory and ping
-    round trip. Run it from source and from the frozen build
-    (packaging/pyinstaller/morphwheel.spec).
+    round trip. Then it checks that Python's own OpenSSL loads (``tls``; no network). A worker
+    that dies or hangs is reported as an error instead of stalling the run. Run it from source
+    and from the frozen build (packaging/pyinstaller/morphwheel.spec).
 
 Nothing at module level imports Qt. Spawned workers re-run this module, and they must stay Qt-free,
 just like ``morphwheel.__main__`` (phase-4 §3).
@@ -215,6 +216,65 @@ def _probe_worker(conn: Any, module: str | None) -> None:
         conn.send(msg)
 
 
+WORKER_REPLY_TIMEOUT_S = 60.0  # generous: Defender may scan the first frozen spawn
+
+
+def _measure_worker(ctx: Any, module: str | None) -> dict[str, Any]:
+    parent, child = ctx.Pipe()
+    started = time.perf_counter()
+    proc = ctx.Process(target=_probe_worker, args=(child, module), daemon=True)
+    proc.start()
+    child.close()  # only the worker holds this end now, so its death reads as EOF, not a hang
+
+    def reply() -> Any:
+        if not parent.poll(WORKER_REPLY_TIMEOUT_S):
+            raise TimeoutError(f"no reply within {WORKER_REPLY_TIMEOUT_S:.0f} s")
+        return parent.recv()
+
+    try:
+        ready = reply()
+        cold_start = time.perf_counter() - started
+        ping_start = time.perf_counter_ns()
+        parent.send("ping")
+        reply()
+        rtt_ms = (time.perf_counter_ns() - ping_start) / 1e6
+        memory = memory_mb(ready["pid"])  # while the worker is still alive
+        parent.send("stop")
+    except (EOFError, OSError) as e:  # died (EOF / broken pipe) or hung (TimeoutError)
+        proc.join(1)
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(5)
+        error = f"{type(e).__name__}: {str(e) or 'the worker exited'}"
+        return {"error": error, "exitcode": proc.exitcode}
+    finally:
+        parent.close()
+    proc.join(5)
+    return {
+        "cold_start_s": round(cold_start, 3),
+        "import_s": round(ready["import_s"], 3),
+        "ping_rtt_ms": round(rtt_ms, 3),
+        "qt_loaded": ready["qt_loaded"],
+        "qt_modules": ready["qt_modules"],
+        "memory": memory,
+    }
+
+
+def tls_check() -> dict[str, Any]:
+    """Python's own OpenSSL loads (the HEIC download, A6, needs it). Makes no network connection.
+
+    Runs after the memory and cold-start figures, so it doesn't move them.
+    """
+    try:
+        import _hashlib  # noqa: F401  (OpenSSL-backed hashlib)
+        import ssl
+
+        context = ssl.create_default_context()  # also loads the Windows root store
+        return {"ok": True, "openssl": ssl.OPENSSL_VERSION, "ca_certs": len(context.get_ca_certs())}
+    except Exception as e:  # report it: measure must still finish
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
 def measure(workers: int, module: str | None) -> dict[str, Any]:
     from PySide6.QtWidgets import QApplication, QWidget
 
@@ -233,28 +293,8 @@ def measure(workers: int, module: str | None) -> dict[str, Any]:
 
     ctx = multiprocessing.get_context("spawn")
     for _ in range(workers):
-        parent, child = ctx.Pipe()
-        started = time.perf_counter()
-        proc = ctx.Process(target=_probe_worker, args=(child, module), daemon=True)
-        proc.start()
-        ready = parent.recv()
-        cold_start = time.perf_counter() - started
-        ping_start = time.perf_counter_ns()
-        parent.send("ping")
-        parent.recv()
-        rtt_ms = (time.perf_counter_ns() - ping_start) / 1e6
-        result["workers"].append(
-            {
-                "cold_start_s": round(cold_start, 3),
-                "import_s": round(ready["import_s"], 3),
-                "ping_rtt_ms": round(rtt_ms, 3),
-                "qt_loaded": ready["qt_loaded"],
-                "qt_modules": ready["qt_modules"],
-                "memory": memory_mb(ready["pid"]),
-            }
-        )
-        parent.send("stop")
-        proc.join(5)
+        result["workers"].append(_measure_worker(ctx, module))
+    result["tls"] = tls_check()
     del overlay
     return result
 
@@ -398,8 +438,11 @@ def drag(any_source: bool, minutes: float) -> None:
         log(
             "SHOW",
             f"via {why} +{(state['t_show'] - state['t_down']) * 1000:.0f} ms after down; "
-            f"screen={screen.name()} dpr={screen.devicePixelRatio()} {foreground_info()}",
+            f"screen={screen.name()} dpr={screen.devicePixelRatio()}",
         )
+        # Later, so its Win32 queries delay neither the show nor DragEnter (C11). It still logs
+        # when no DragEnter comes, e.g. over an elevated window.
+        QTimer.singleShot(300, lambda: log("FG", foreground_info()))
 
     def on_button(down: bool) -> None:
         if down:
