@@ -1,7 +1,9 @@
 """Where an output goes, and what it is called (phase-2 §3.4, D2).
 
-- **Name.** A conversion gives ``<stem><ext>``. Compress gives ``<stem> (compressed)<ext>``, keeping
-  the source's own extension.
+- **Name.** A conversion gives ``<stem><ext>``. Compress gives ``<stem> (compressed)<ext>``. It
+  keeps the source's own extension when that matches the detected format; a file with no
+  extension, or a mislabeled one, gets the detected format's extension instead. Only a known image
+  extension is cut from ``<stem>``: ``Dr. Who`` stays whole (RD-3).
 - **Collision.** The name gets `` (1)``, `` (2)``, … up to ``MAX_COLLISION_SUFFIX``. These are only
   *candidates*: ``engine.file_ops.reserve_unique`` claims one atomically (exclusive create), so a
   file is never overwritten, even in a race.
@@ -17,25 +19,37 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from morphwheel.core.catalog import Target, TargetKind
-from morphwheel.core.formats import OUTPUT_EXTENSION
+from morphwheel.core.formats import OUTPUT_EXTENSION, FormatId, format_from_path
 
 MAX_COLLISION_SUFFIX = 999
 COMPRESSED_TAG = "compressed"
 
 
-def output_extension(source: Path, target: Target) -> str:
-    if target.kind is TargetKind.COMPRESS or target.output_format is None:
-        return source.suffix
-    return OUTPUT_EXTENSION[target.output_format]
+def output_extension(source: Path, target: Target, source_format: FormatId | None) -> str:
+    """``source_format`` is the detected (sniffed) format; ``None`` if nothing better is known."""
+    if target.output_format is not None:
+        return OUTPUT_EXTENSION[target.output_format]
+    # Compress keeps the format, so the extension follows the bytes, not the name.
+    named = format_from_path(source)
+    if source_format is None:
+        return source.suffix if named is not None else ""
+    return source.suffix if named is source_format else OUTPUT_EXTENSION[source_format]
 
 
-def candidate_paths(source: Path, target: Target, directory: Path | None = None) -> Iterator[Path]:
+def candidate_paths(
+    source: Path,
+    target: Target,
+    directory: Path | None = None,
+    *,
+    source_format: FormatId | None,
+) -> Iterator[Path]:
     """Output paths to try, in order. Finite: the base name, then ``(1)`` to ``(999)``."""
     folder = source.parent if directory is None else directory
-    stem = source.stem
+    # Only a known image extension is dropped; in "Dr. Who", ". Who" is part of the name.
+    stem = source.stem if format_from_path(source) is not None else source.name
     if target.kind is TargetKind.COMPRESS:
         stem = f"{stem} ({COMPRESSED_TAG})"
-    ext = output_extension(source, target)
+    ext = output_extension(source, target, source_format)
     forbidden = str(source).casefold()  # Windows paths are case-insensitive
     names = (f"{stem}{ext}", *(f"{stem} ({n}){ext}" for n in range(1, MAX_COLLISION_SUFFIX + 1)))
     for name in names:

@@ -12,7 +12,7 @@ from builtin_targets import BUILTINS, file, plugin
 
 from morphwheel.core.catalog import Catalog, Reason, SlotPos
 from morphwheel.core.formats import FormatId
-from morphwheel.core.geometry import Point, WheelGeometry, polar
+from morphwheel.core.geometry import MoreArc, Point, Region, RegionKind, WheelGeometry, polar
 from morphwheel.core.wheel_session import (
     ARMING_DISTANCE,
     GIVE_UP_AFTER_NS,
@@ -157,6 +157,17 @@ def test_more_opens_when_pushed_outward() -> None:
     session = armed_session()
     session.on_pointer(polar(315, 80), 20 * MS)
     assert session.on_pointer(polar(315, 130), 21 * MS).more_arc is not None
+
+
+def test_drop_decides_on_the_more_state_the_user_saw() -> None:
+    """RF-2: a drop that would push through the More slot must not open the arc and pick an item."""
+    session = armed_session()
+    session.on_pointer(polar(315, 80), 20 * MS)  # on More, the arc still closed
+    arc = MoreArc(315.0, len(PLUGINS))
+    item0 = polar(arc.item_angle(0), 150)
+    assert G.is_outward_of_more_slot(item0)  # a pointer event here would open the arc,
+    assert G.region(item0, arc) == Region(RegionKind.MORE_ITEM, item=0)  # landing on PLUGINS[0]
+    assert session.decide_drop(item0, 21 * MS) == Cancel(CancelReason.HALO)
 
 
 def test_more_without_plugins_never_opens() -> None:

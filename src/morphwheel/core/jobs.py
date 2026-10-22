@@ -1,15 +1,19 @@
 """What flows between the wheel, the dispatcher and the workers (phase-4 §4.1).
 
 ``Task`` and ``TaskResult`` cross a process boundary (spawn; a separate worker executable under
-A5a), so they must stay picklable. That means plain dataclasses, ``Path``, enums, and a plain
-``dict`` for options.
+A5a), so they must stay picklable: plain dataclasses, ``Path`` and enums. ``Task.options`` is a
+read-only copy of the caller's mapping. It pickles as a plain ``dict``, but ``dataclasses.asdict``
+can't copy it, so don't use ``asdict`` on a ``Task``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any
 
 from morphwheel.core.catalog import Target
 from morphwheel.core.errors import ErrorCode
@@ -31,8 +35,20 @@ class Task:
     source: Path
     target: Target
     fallback_dir: Path  # Downloads\Morphwheel, used when the source folder is read-only
-    options: dict[str, object] = field(default_factory=dict)  # quality / compress preset
+    # Quality / compress preset. Values may be unhashable, so the options stay out of hash().
+    options: Mapping[str, object] = field(default_factory=dict, hash=False)
     hash_limit_bytes: int = DEFAULT_HASH_LIMIT
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
+
+    # A mappingproxy can't be pickled: send the options as a dict and wrap them again on arrival.
+    def __getstate__(self) -> dict[str, Any]:
+        return {**self.__dict__, "options": dict(self.options)}
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        object.__setattr__(self, "options", MappingProxyType(dict(state["options"])))
 
 
 @dataclass(frozen=True)
@@ -66,10 +82,10 @@ class TaskResult:
 class JobOutcome(StrEnum):
     """Which toast a finished job gets (phase-3 §5)."""
 
-    SUCCESS = "success"  # every file converted (some may have been skipped)
+    SUCCESS = "success"  # every file converted (some may have been skipped or already compact)
     PARTIAL = "partial"  # some converted, some failed
     FAILED = "failed"  # nothing converted
-    ALREADY_COMPACT = "already_compact"  # Compress: nothing came out smaller
+    ALREADY_COMPACT = "already_compact"  # Compress: nothing came out smaller, nothing failed
     NOTHING_TO_DO = "nothing_to_do"  # every file was skipped
     SOURCE_CHANGED = "source_changed"  # critical; overrides everything else
 
@@ -92,8 +108,22 @@ class JobResult:
         return self._count(TaskStatus.SKIPPED)
 
     @property
+    def already_compact(self) -> tuple[TaskResult, ...]:
+        """Compress results that weren't smaller: not failures (RD-2), shown with ✓ (phase-3 §5)."""
+        return tuple(
+            r
+            for r in self.results
+            if r.status is TaskStatus.FAILED and r.error is ErrorCode.NOT_SMALLER
+        )
+
+    @property
     def failed(self) -> tuple[TaskResult, ...]:
-        return tuple(r for r in self.results if r.status is TaskStatus.FAILED)
+        """Real failures, without ``already_compact``."""
+        return tuple(
+            r
+            for r in self.results
+            if r.status is TaskStatus.FAILED and r.error is not ErrorCode.NOT_SMALLER
+        )
 
     @property
     def outputs(self) -> tuple[CreatedFile, ...]:
@@ -103,13 +133,8 @@ class JobResult:
     def outcome(self) -> JobOutcome:
         if any(not r.source_intact for r in self.results):
             return JobOutcome.SOURCE_CHANGED
-        failed = self.failed
-        if self.ok_count == 0 and not failed:
-            return JobOutcome.NOTHING_TO_DO
-        if not failed:
+        if self.failed:
+            return JobOutcome.PARTIAL if self.ok_count else JobOutcome.FAILED
+        if self.ok_count:
             return JobOutcome.SUCCESS
-        if self.ok_count == 0:
-            if all(r.error is ErrorCode.NOT_SMALLER for r in failed):
-                return JobOutcome.ALREADY_COMPACT
-            return JobOutcome.FAILED
-        return JobOutcome.PARTIAL
+        return JobOutcome.ALREADY_COMPACT if self.already_compact else JobOutcome.NOTHING_TO_DO

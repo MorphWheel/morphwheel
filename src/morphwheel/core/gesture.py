@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import assert_never
 
 RELEASE_GRACE_NS = 150_000_000  # 150 ms
 
@@ -198,10 +199,11 @@ class GestureMachine:
             return self._finish(HideReason.DROPPED)
         if isinstance(event, DropCancelled):
             return self._finish(HideReason.CANCELLED)
-        # Tick
-        if self.state is State.RELEASING and event.t_ns - self._released_at >= RELEASE_GRACE_NS:
-            return self._finish(HideReason.CANCELLED)
-        return []
+        if isinstance(event, Tick):
+            if self.state is State.RELEASING and event.t_ns - self._released_at >= RELEASE_GRACE_NS:
+                return self._finish(HideReason.CANCELLED)
+            return []
+        assert_never(event)  # a new Event type must get its own branch
 
     def _open(self) -> list[Command]:
         self.state = State.WHEEL_OPEN

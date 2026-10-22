@@ -126,13 +126,22 @@ def sniff(header: bytes) -> Sniff:
         return _isobmff(header)
     if header.startswith((b"II*\x00", b"MM\x00*")):
         return Sniff(FormatId.TIFF, False)
-    if header.startswith(b"BM"):
+    if header.startswith(b"BM") and _bmp_dib_header(header):
         return Sniff(FormatId.BMP, False)
     if header.startswith(b"\x00\x00\x01\x00"):
         return Sniff(FormatId.ICO, False)
     if header.startswith(b"%PDF-"):
         return Sniff(FormatId.PDF, False)
     return Sniff(None, None)
+
+
+# The DIB header sizes Pillow's BMP reader accepts, OS/2 v1 (12) to BITMAPV5HEADER (124).
+_BMP_DIB_HEADER_SIZES = frozenset({12, 40, 52, 56, 64, 108, 124})
+
+
+def _bmp_dib_header(data: bytes) -> bool:
+    """A real bitmap has a known DIB header size at offset 14; "BM" alone matches plenty of text."""
+    return len(data) >= 18 and struct.unpack("<I", data[14:18])[0] in _BMP_DIB_HEADER_SIZES
 
 
 def _png_animated(data: bytes) -> bool | None:
