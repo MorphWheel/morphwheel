@@ -13,9 +13,9 @@
 |---|---|
 | **Phase** | Phase 5: implementation |
 | **Sprint** | S1 ✅ approved. **S2 is next** (M1). S0 is code-complete; two of its 👤 items are still open (S0-1) |
-| **Current task** | Between sessions. Review findings RF-1–6, 8–10, 12 and 14 are fixed, and RD-1 to RD-3 are approved. Committed and pushed to `main` on 2026-10-22. |
+| **Current task** | Scripted drag run done (S0-2): C1–C3, C5–C8 and C12 pass synthetically in one clean run on 2026-10-28. Committed and pushed to `main` on 2026-10-28. |
 | **Next** | S2 (OS hooks and dev wheel), once the 👤 items below are done. RF-7 and RF-15 come with S2. |
-| **Blocked on** | **S2 is blocked** until the remaining S0 👤 items close: checklist C1–C12 and the SignPath application. Repo and CI are ✅ done. |
+| **Blocked on** | **S2 is blocked** until the remaining S0 👤 items close: the real-hand checklist rows (C4, C9, C11, plus whether the synthetic passes count for the rest; S0-2) and the SignPath application. Repo and CI are ✅ done. |
 | **Next approval stop** | End of S2 (A2) |
 
 ## Discovery phases
@@ -64,10 +64,10 @@
 - [x] CI is green on GitHub ([Actions](https://github.com/MorphWheel/morphwheel/actions)): about 1 minute on windows-latest
 - [x] The `force_copy` matrix passes
 - [x] Frozen-build measurements: worker cold start, idle memory, build size. Targets for criteria 5–6 are proposed in the report.
-- [ ] Integration checklist v1 executed (👤 real drags):
-  - [ ] Spike tests 4–6
-  - [ ] Esc
-  - [ ] Elevated window in the foreground
+- [ ] Integration checklist v1 executed (👤 real drags). **Scripted run 2026-10-28 (S0-2, synthetic):** C1, C2, C3, C5, C6, C7, C8 and C12 ✅; see the checklist. Still real-hand items:
+  - [ ] Spike tests 4–6: C4 (Desktop as source) 👤; C5 and C6 ✅ synthetic
+  - [ ] Esc: ✅ synthetic (C8); 👤 to confirm by hand
+  - [ ] Elevated window in the foreground (C9)
   - [ ] Multiple monitors, if available
   - [ ] **Re-measure on a local console session (not RDP)**
   - [x] Defender scan: no threats
@@ -200,7 +200,7 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 | 1 | ~~Create the GitHub org `morphwheel` and a public repo~~ ✅ 2026-10-19: Yuval created the org; the public repo [MorphWheel/morphwheel](https://github.com/MorphWheel/morphwheel) was created, with private vulnerability reporting on | Done |
 | 1b | ~~First commit and push~~ ✅ pushed to `main` at Yuval's request. Recommended: require 2FA for org members (Org settings → Authentication security) | Done (2FA: Yuval) |
 | 2 | Apply to SignPath Foundation | After #1 |
-| 3 | Run the manual drag checklist, including once on a local console session (not RDP) | End of S0 |
+| 3 | Run the manual drag checklist: C4, C9 and C11 (at the physical machine) by hand, and decide whether the synthetic passes for the other rows close them (S0-2) | End of S0 |
 | 4 | Optional: upload the build to VirusTotal (this sends the file to a third party) | End of S0 |
 | 5 | Decide whether to delete the temporary spike venv (`%LOCALAPPDATA%\Temp\twspk`, ~280 MB). Nothing uses it. | Any time |
 
@@ -220,6 +220,13 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 | Placing the onboarding bubble when the tray icon is in the overflow area | S5 |
 
 ## Work log (newest first)
+
+- **2026-10-26 to 2026-10-28 (scripted drag run, S0-2)**
+  - Built `tools/drag_driver.py` (SendInput, ctypes only) and `tools/uia_helper.ps1` (UI Automation, read-only). Approved as S0-2: synthetic results, marked as such.
+  - **Result:** C8, C1, C2, C3, C5, C7, C6 and C12 pass in one clean run (2026-10-28), files unchanged. Details in `docs/testing/integration-checklist.md`.
+  - **Not covered:** C4 (UI Automation exposes no desktop icons here), C9 (UAC), C11 (physical console); C10 n/a.
+  - **Found on the way:** over RDP the client echoes earlier cursor positions back after injected moves, and a press on an item's padding starts a rubber band, not a drag. The driver verifies every press and release point, and cancels with Esc when it can't.
+  - 2026-10-28: committed and pushed to `main` at Yuval's request.
 
 - **2026-10-19 (review fixes)**
   - Fixed RF-1–6, 8–10, 12 and 14. Each fix got a regression test that failed on the old code first.

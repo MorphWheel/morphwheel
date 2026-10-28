@@ -36,6 +36,52 @@ by hand at the end of every sprint, and it grows as features land. Results go in
 | C11 | Local console timing | Do C1 and C2 **at the physical machine** (not over RDP) | Compare `ENTER` latency with the RDP numbers (9–51 ms in the spike) | S0 |
 | C12 | Frozen build | Do C1 with `drag_probe.exe` | Same as C1 | S0 |
 
+## Scripted run (synthetic, S0-2)
+
+`tools/drag_driver.py` drives rows C1–C8 and C12 with injected input (`SendInput`) against the real
+Explorer and OLE drag loop, while the probe logs. `tools/uia_helper.ps1` finds the file icons through
+UI Automation and checks every press point first. Results are **synthetic**: they say nothing about
+hand timing, the physical console (C11) or the UAC prompt (C9), and they don't close the 👤 rows.
+
+Run it with the RDP window visible and your hands off the mouse and keyboard for about a minute:
+
+```bash
+.venv\Scripts\python.exe tools\drag_driver.py --dry-run
+.venv\Scripts\python.exe tools\drag_driver.py
+```
+
+Its results land next to the probe logs as `drag_driver-*.json`. It refuses to start unless the
+desktop is reachable, stops at the first failure, and only ever releases the mouse button over the
+probe's wheel or over its own window's item list; anything else is cancelled with Esc first.
+
+**2026-10-28, RDP, one monitor at 200 %, Windows 11 25H2.** One clean run, no retries, every
+row's files unchanged (sha256), source probe then the frozen build:
+
+| Row | Result | Evidence |
+|---|---|---|
+| C8 | ✅ synthetic | `esc` logged, `DragLeave (button down)`: Esc cancels the OLE drag, no `DROP` |
+| C1 | ✅ synthetic | `ENTER` 12 ms after `SHOW`; `DROP slot:Compress → CopyAction`; `source intact` |
+| C2 | ✅ synthetic | `ENTER` 12 ms after `SHOW` with no movement for 2 s |
+| C3 | ✅ synthetic | release over the hub: no `DROP`, overlay hid on release |
+| C5 | ✅ synthetic | after Ctrl+C on another file, `ENTER`/`DROP` list the dragged file only |
+| C7 | ✅ synthetic | threshold crossed, no `SHOW` without Shift |
+| C6 | ✅ synthetic | title-bar press: `source_ok=False` (`TITLE_BAR_SCAFFOLDING_WINDOW_CLASS`), no `SHOW` |
+| C12 | ✅ synthetic | frozen `drag_probe.exe`: `ENTER` 59 ms after `SHOW`; `DROP slot:Compress → CopyAction` |
+| C4 | not run | UI Automation on this machine exposes no desktop icons, so the press point can't be verified. 👤 |
+| C9 | 👤 | needs the UAC prompt |
+| C10 | n/a | one monitor |
+| C11 | 👤 | the physical console |
+
+The drops aim at the Compress slot (south) rather than JPG: at 200 % the JPG point sits above the
+item list, over Explorer's command bar, and an echoed RDP cursor position there at press time could
+have clicked a toolbar button. `SHOW` comes about 550 ms after the press because the script holds
+still before pressing Shift; that number says nothing about the app.
+
+Two RDP facts the driver works around, and anyone scripting drags over RDP should know:
+the client echoes earlier cursor positions back to the server for a while after injected moves
+(a `GetCursorPos` read can jump back to where the cursor was), and a press that lands on an item's
+padding starts a rubber-band selection, not a drag, so no DragEnter ever arrives.
+
 ## Automated checks (no desktop needed)
 
 | ID | Check | Since |
