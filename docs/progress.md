@@ -258,7 +258,7 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
   - Quality defaults measured (PSNR and size at each default and its neighbours) and Compress for PNG defined (RD-7). Conversion-time target proposed (T7).
   - A code review (high effort) on the working tree found 8 items, all fixed (a stat on the GUI thread in DragEnter, a leak for all-skipped jobs, queued tasks running after shutdown, tasks hanging when no worker starts, a stuck job when the pool refuses, dead code, a clumsy helper, a duplicated fixture). The security review found nothing above its bar; three hardening notes applied (plain-text toast labels, the file id in Undo, the engine folder appended to `sys.path`). Four cleanup lenses: 26 of 30 findings applied, 4 skipped with reasons. The frozen build was rebuilt from the final sources and re-checked.
   - Docs: S3 report, decisions RD-7 to RD-10 and T7, checklist rows C23–C27 and automated checks A4–A5, README (`--install-heic`), overview.
-  - Yuval approved S3 with RD-7 to RD-10 and T7 (A2). Committed to `main` at Yuval's request; not pushed.
+  - Yuval approved S3 with RD-7 to RD-10 and T7 (A2). Committed and pushed to `main` at Yuval's request; CI green on `01f4850`.
 
 - **2026-10-29 (S0 closed, S2 started)**
   - Yuval lifted the S0-1 gate and closed S0 (S0-3). C4, C9, C11 and SignPath stay 👤 and gate S7.
