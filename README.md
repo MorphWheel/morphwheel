@@ -37,6 +37,9 @@ py -3.12 -m venv .venv
 .venv\Scripts\lint-imports.exe
 ```
 
+Run the development wheel from source with `.venv\Scripts\python.exe -m morphwheel --debug`. It shows the
+wheel on a Shift-drag from File Explorer and logs the drop; conversions arrive in the next sprint.
+
 Design documents, decisions and progress are in [`docs/`](docs/README.md).
 
 ## License

@@ -117,3 +117,29 @@ forbidden_modules = [
     "morphwheel.settings",
     "morphwheel.ui",
 ]
+
+[[tool.importlinter.contracts]]
+name = "P1: platform is Qt-free except the two QObject adapters, and imports no other layer"
+type = "forbidden"
+source_modules = ["morphwheel.platform"]
+forbidden_modules = [
+    "PySide6",
+    "shiboken6",
+    "morphwheel.app",
+    "morphwheel.engine",
+    "morphwheel.plugins",
+    "morphwheel.settings",
+    "morphwheel.ui",
+]
+ignore_imports = [
+    "morphwheel.platform.raw_input -> PySide6",
+    "morphwheel.platform.modifier_poller -> PySide6",
+]
+# Warn, not fail, while a listed adapter doesn't exist yet (S2 lands them one at a time).
+unmatched_ignore_imports_alerting = "warn"
+
+[[tool.importlinter.contracts]]
+name = "P2: ui has no Win32 and wires nothing itself"
+type = "forbidden"
+source_modules = ["morphwheel.ui"]
+forbidden_modules = ["ctypes", "morphwheel.platform", "morphwheel.engine", "morphwheel.app"]
