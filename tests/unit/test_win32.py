@@ -31,6 +31,9 @@ from morphwheel.platform import _win32 as w
         (w.HIGHCONTRASTW, 16, 8),
         (w.STARTUPINFOW, 104, 8),
         (w.PROCESS_INFORMATION, 24, 8),
+        (w.SHFILEOPSTRUCTW, 56, 8),
+        (w.SID_AND_ATTRIBUTES, 16, 8),
+        (w.TOKEN_MANDATORY_LABEL, 16, 8),
         (wt.MSG, 48, 8),
         (wt.POINT, 8, 4),
     ],
@@ -155,6 +158,9 @@ def test_token_queries_marshal() -> None:
         )
         assert w.token_information_dword(token.value, w.TOKEN_ELEVATION) in (0, 1)
         assert w.token_information_dword(token.value, 9999) is None  # negative control
+        rid = w.token_integrity_rid(token.value)
+        assert rid in (w.SECURITY_MANDATORY_MEDIUM_RID, w.SECURITY_MANDATORY_HIGH_RID)
     finally:
         assert w.kernel32.CloseHandle(token)
+    assert w.token_integrity_rid(0) is None  # negative control: no token
     assert not w.kernel32.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, False, 0)

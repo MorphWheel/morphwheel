@@ -96,8 +96,7 @@ markers = [
 ]
 
 # --------------------------------------------------------------------------- import boundaries
-# phase-4 §1 (R1–R5). Contracts for modules that don't exist yet are added in the sprint that
-# creates them (worker_main and plugins.api in S3; ui → worker_pool in S3).
+# phase-4 §1 (R1–R5). R5 (the GUI never imports plugin code) is a code-review and test rule.
 [tool.importlinter]
 root_package = "morphwheel"
 include_external_packages = true
@@ -142,4 +141,66 @@ unmatched_ignore_imports_alerting = "warn"
 name = "P2: ui has no Win32 and wires nothing itself"
 type = "forbidden"
 source_modules = ["morphwheel.ui"]
-forbidden_modules = ["ctypes", "morphwheel.platform", "morphwheel.engine", "morphwheel.app"]
+forbidden_modules = [
+    "ctypes",
+    "morphwheel.platform",
+    "morphwheel.engine.worker_pool",
+    "morphwheel.engine.worker_main",
+    "morphwheel.engine.dispatcher",
+    "morphwheel.engine.engines",
+    "morphwheel.app",
+]
+
+[[tool.importlinter.contracts]]
+name = "R2: the worker side (worker_main and what it imports) never loads Qt or a GUI layer"
+type = "forbidden"
+source_modules = [
+    "morphwheel.engine.worker_main",
+    "morphwheel.engine.worker_pool",
+    "morphwheel.engine.file_ops",
+    "morphwheel.engine.integrity",
+    "morphwheel.plugins.loader",
+    "morphwheel.plugins.api",
+    "morphwheel.builtin",
+]
+forbidden_modules = [
+    "PySide6",
+    "shiboken6",
+    "morphwheel.ui",
+    "morphwheel.app",
+    "morphwheel.platform",
+    "morphwheel.engine.dispatcher",
+]
+
+[[tool.importlinter.contracts]]
+name = "R3: plugins.api is the public SDK and uses the standard library only"
+type = "forbidden"
+source_modules = ["morphwheel.plugins.api"]
+forbidden_modules = [
+    "PySide6",
+    "shiboken6",
+    "PIL",
+    "platformdirs",
+    "tomli_w",
+    "morphwheel.app",
+    "morphwheel.builtin",
+    "morphwheel.core",
+    "morphwheel.engine",
+    "morphwheel.logs",
+    "morphwheel.platform",
+    "morphwheel.plugins.loader",
+    "morphwheel.plugins.manifest",
+    "morphwheel.settings",
+    "morphwheel.ui",
+]
+
+[[tool.importlinter.contracts]]
+name = "R4: only app wires the layers; a layer imports downward only"
+type = "layers"
+layers = [
+    "morphwheel.app",
+    "morphwheel.ui | morphwheel.platform",
+    "morphwheel.engine | morphwheel.builtin",
+    "morphwheel.plugins",
+    "morphwheel.core | morphwheel.settings | morphwheel.logs",
+]

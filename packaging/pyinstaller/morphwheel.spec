@@ -1,14 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for Morphwheel (phase-4 §8): onedir, no UPX, version resource.
+"""PyInstaller spec for Morphwheel (phase-4 §8): onedir, no UPX, version resource, two executables.
 
-S0: ENTRY is the drag probe, which measures the frozen runtime (worker cold start, idle memory, build
-size) and is used for the antivirus scan. S2 switches ENTRY to ``src/morphwheel/__main__.py``. S7
-finalizes the spec (icon, builtin plugin data, release naming).
+- ``morphwheel.exe``: the GUI, windowed, from ``src/morphwheel/__main__.py``.
+- ``morphwheel-worker.exe`` (decision A5a): the Qt-free worker, from ``worker_entry.py``, built from
+  its own Analysis that excludes PySide6, so PyInstaller's PySide6 runtime hook never runs in a
+  worker (S0 finding 1). Both share one ``_internal`` folder.
+- The builtin plugin's ``plugin.toml`` ships as a data file beside the code (read by path, R5).
+
+S0 built the drag probe from this spec; the probe now runs from source only. S7 finalizes the spec
+(icon, release naming, license texts).
 
 Build from the repo root::
 
     .venv\\Scripts\\pyinstaller.exe packaging\\pyinstaller\\morphwheel.spec --noconfirm ^
         --distpath packaging\\output\\dist --workpath packaging\\output\\build
+
+Then check the workers in the frozen build (A5a): ``dist\\morphwheel\\morphwheel.exe --worker-check``
+writes one line per worker to ``%LOCALAPPDATA%\\Morphwheel\\logs\\morphwheel.log`` with the worker's
+executable and ``qt_loaded``, and exits 0 only when every worker came up Qt-free.
 """
 
 import os
@@ -17,10 +26,13 @@ from pathlib import Path
 
 HERE = Path(SPECPATH).resolve()  # noqa: F821 - SPECPATH is injected by PyInstaller
 ROOT = HERE.parents[1]
+SRC = ROOT / "src"
 
-ENTRY = ROOT / "tools" / "drag_probe.py"
-NAME = "drag_probe"
-CONSOLE = True  # the probe prints its measurements; the app (S2+) is windowed
+GUI_ENTRY = SRC / "morphwheel" / "__main__.py"
+WORKER_ENTRY = HERE / "worker_entry.py"
+NAME = "morphwheel"
+WORKER_NAME = "morphwheel-worker"
+VERSION_FILE = str(HERE / "file_version_info.txt")
 
 EXCLUDES = [
     # Decision A6: pillow-heif wheels are GPLv2 (x265). It must never be bundled.
@@ -45,12 +57,27 @@ EXCLUDES = [
     "PySide6.QtDBus",
     "tkinter",
 ]
+# The worker must not contain Qt at all (R2, A5a).
+WORKER_EXCLUDES = [*EXCLUDES, "PySide6", "shiboken6"]
 
-a = Analysis(  # noqa: F821
-    [str(ENTRY)],
-    pathex=[str(ROOT / "src")],
-    hiddenimports=["PIL.Image"],  # imported by name in the probe's workers
+DATAS = [
+    (
+        str(SRC / "morphwheel" / "builtin" / "pillow_images" / "plugin.toml"),
+        "morphwheel/builtin/pillow_images",
+    )
+]
+
+gui = Analysis(  # noqa: F821
+    [str(GUI_ENTRY)],
+    pathex=[str(SRC)],
+    datas=DATAS,
     excludes=EXCLUDES,
+    noarchive=False,
+)
+worker = Analysis(  # noqa: F821
+    [str(WORKER_ENTRY)],
+    pathex=[str(SRC)],
+    excludes=WORKER_EXCLUDES,
     noarchive=False,
 )
 
@@ -77,22 +104,53 @@ def _keep(dest: str) -> bool:
     return _name(dest) not in DROP_FILES and not any(d in dest for d in DROP_DIRS)
 
 
-a.binaries = [b for b in a.binaries if _keep(b[0])]
+gui.binaries = [b for b in gui.binaries if _keep(b[0])]
+worker.binaries = [b for b in worker.binaries if _keep(b[0])]
 
 for dll in PYTHON_OPENSSL:
-    sources = [src for dest, src, _ in a.binaries if _name(dest) == dll]
+    sources = [src for dest, src, _ in gui.binaries if _name(dest) == dll]
     if [os.path.normcase(os.path.realpath(os.path.dirname(s))) for s in sources] != [PYTHON_DLLS]:
         raise SystemExit(f"morphwheel.spec: bundle {dll} once, from {PYTHON_DLLS}; got {sources}")
 
-pyz = PYZ(a.pure)  # noqa: F821
-exe = EXE(  # noqa: F821
-    pyz,
-    a.scripts,
+# The worker's own analysis must be Qt-free before anything is built (R2, A5a).
+qt_in_worker = sorted(
+    {m for m in worker.pure.filenames() if m.split(".")[0] in ("PySide6", "shiboken6")}
+    if hasattr(worker.pure, "filenames")
+    else {name for name, _, _ in worker.pure if name.split(".")[0] in ("PySide6", "shiboken6")}
+)
+if qt_in_worker:
+    raise SystemExit(f"morphwheel.spec: the worker analysis pulled in Qt: {qt_in_worker[:5]}")
+
+gui_pyz = PYZ(gui.pure)  # noqa: F821
+worker_pyz = PYZ(worker.pure)  # noqa: F821
+
+gui_exe = EXE(  # noqa: F821
+    gui_pyz,
+    gui.scripts,
     [],
     exclude_binaries=True,
     name=NAME,
-    console=CONSOLE,
+    console=False,
     upx=False,
-    version=str(HERE / "file_version_info.txt"),
+    version=VERSION_FILE,
 )
-coll = COLLECT(exe, a.binaries, a.datas, upx=False, name=NAME)  # noqa: F821
+worker_exe = EXE(  # noqa: F821
+    worker_pyz,
+    worker.scripts,
+    [],
+    exclude_binaries=True,
+    name=WORKER_NAME,
+    console=False,
+    upx=False,
+    version=VERSION_FILE,
+)
+coll = COLLECT(  # noqa: F821
+    gui_exe,
+    gui.binaries,
+    gui.datas,
+    worker_exe,
+    worker.binaries,
+    worker.datas,
+    upx=False,
+    name=NAME,
+)

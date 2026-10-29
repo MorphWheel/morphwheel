@@ -70,6 +70,7 @@ _sig(user32.GetCursorPos, wt.BOOL, POINTER(wt.POINT))
 _sig(user32.GetAsyncKeyState, ctypes.c_short, ctypes.c_int)
 _sig(user32.GetDpiForWindow, wt.UINT, wt.HWND)
 _sig(user32.GetSystemMetricsForDpi, ctypes.c_int, ctypes.c_int, wt.UINT)
+_sig(user32.GetSystemMetrics, ctypes.c_int, ctypes.c_int)
 _sig(user32.GetForegroundWindow, wt.HWND)
 _sig(user32.GetWindowThreadProcessId, wt.DWORD, wt.HWND, POINTER(wt.DWORD))
 _sig(kernel32.GetCurrentProcess, wt.HANDLE)
@@ -96,8 +97,8 @@ _sig(
     POINTER(wt.DWORD),
 )
 
-VK_LBUTTON, VK_SHIFT, VK_ESCAPE = 0x01, 0x10, 0x1B
-SM_CXDRAG, SM_CYDRAG = 68, 69
+VK_LBUTTON, VK_RBUTTON, VK_SHIFT, VK_ESCAPE = 0x01, 0x02, 0x10, 0x1B
+SM_SWAPBUTTON, SM_CXDRAG, SM_CYDRAG = 23, 68, 69
 GA_PARENT = 1
 PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ = 0x1000, 0x0010
 ALLOWED_CLASSES = {"SHELLDLL_DefView", "NamespaceTreeControl"}
@@ -163,6 +164,11 @@ def cursor() -> tuple[int, int]:
     pt = wt.POINT()
     user32.GetCursorPos(byref(pt))
     return pt.x, pt.y
+
+
+def primary_button_down() -> bool:
+    """Raw input and GetAsyncKeyState name physical buttons; honor "switch buttons" (RD-5)."""
+    return key_down(VK_RBUTTON if user32.GetSystemMetrics(SM_SWAPBUTTON) else VK_LBUTTON)
 
 
 def key_down(vk: int) -> bool:
@@ -401,7 +407,7 @@ def drag(any_source: bool, minutes: float) -> None:
                 reject(e)
 
         def dragLeaveEvent(self, _: Any) -> None:
-            button_down = key_down(VK_LBUTTON)
+            button_down = primary_button_down()  # RD-5: the primary button may be the right one
             log("leave", f"DragLeave (button {'down' if button_down else 'up'})")
             self.hover = ""
             if not button_down:  # released over hub/halo: OLE sends DragLeave instead of Drop

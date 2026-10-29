@@ -37,6 +37,9 @@ py -3.12 -m venv .venv
 .venv\Scripts\lint-imports.exe
 ```
 
+HEIC input needs the opt-in engine: `.venv\Scripts\python.exe -m morphwheel --install-heic` downloads the
+pinned pillow-heif wheel (GPLv2, never bundled) into `%LOCALAPPDATA%\Morphwheel\engines`.
+
 Run the development wheel from source with `.venv\Scripts\python.exe -m morphwheel --debug`. It shows the
 wheel on a Shift-drag from File Explorer and logs the drop; conversions arrive in the next sprint.
 

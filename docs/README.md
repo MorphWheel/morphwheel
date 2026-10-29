@@ -11,5 +11,5 @@
 | ↳ [`phase-2-concept.md`](discovery/phase-2-concept.md) | MVP, milestones, user journey | |
 | ↳ [`phase-3-ux.md`](discovery/phase-3-ux.md) | UX/UI, ASCII wireframes, micro-interactions | |
 | ↳ [`phase-4-architecture.md`](discovery/phase-4-architecture.md) | Architecture, interfaces, traceability table, sprints | |
-| [`testing/integration-checklist.md`](testing/integration-checklist.md) | Manual drag tests (C1–C12) and automated checks | At the end of every sprint |
+| [`testing/integration-checklist.md`](testing/integration-checklist.md) | Manual drag tests (C1–C27) and automated checks | At the end of every sprint |
 | [`sprints/`](sprints/) | One report per sprint: deliverables, gates, measurements, findings, exit criteria | At each approval stop |

@@ -2,7 +2,8 @@
 
 This module holds only signatures, structs, constants and marshalling helpers. The behavior lives
 in the sibling modules: ``raw_input`` (WM_INPUT), ``modifier_poller`` (key state), ``window_probe``
-(the source window), ``system`` (elevation, DPI, accessibility) and, in S3, ``shell``.
+(the source window), ``system`` (elevation, DPI, accessibility, integrity levels) and ``shell``
+(the Recycle Bin).
 
 Rules:
 
@@ -33,6 +34,7 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 shcore = ctypes.WinDLL("shcore", use_last_error=True)
 userenv = ctypes.WinDLL("userenv", use_last_error=True)
+shell32 = ctypes.WinDLL("shell32", use_last_error=True)
 
 # --------------------------------------------------------------------------- constants
 # Window messages and raw input (winuser.h)
@@ -93,6 +95,20 @@ SECURITY_IMPERSONATION = 2  # SECURITY_IMPERSONATION_LEVEL
 LOGON_WITH_PROFILE = 0x00000001  # CreateProcessWithTokenW dwLogonFlags
 CREATE_UNICODE_ENVIRONMENT = 0x00000400
 TOKEN_PRIMARY = 1  # TOKEN_TYPE
+TOKEN_INTEGRITY_LEVEL = 25  # TOKEN_INFORMATION_CLASS: a TOKEN_MANDATORY_LABEL
+SECURITY_MANDATORY_UNTRUSTED_RID = 0x0000
+SECURITY_MANDATORY_LOW_RID = 0x1000
+SECURITY_MANDATORY_MEDIUM_RID = 0x2000
+SECURITY_MANDATORY_HIGH_RID = 0x3000
+SECURITY_MANDATORY_SYSTEM_RID = 0x4000
+
+# Shell (shellapi.h, shlobj.h)
+FO_DELETE = 0x0003
+FOF_SILENT = 0x0004
+FOF_NOCONFIRMATION = 0x0010
+FOF_ALLOWUNDO = 0x0040
+FOF_NOERRORUI = 0x0400
+DRIVE_FIXED = 3
 INVALID_HANDLE_VALUE = wt.HANDLE(-1).value
 
 # Error codes
@@ -155,6 +171,29 @@ class HIGHCONTRASTW(ctypes.Structure):
         ("dwFlags", wt.DWORD),
         ("lpszDefaultScheme", wt.LPWSTR),
     ]
+
+
+class SHFILEOPSTRUCTW(ctypes.Structure):
+    """Natural alignment on x64 (shellapi.h packs it only for 32-bit builds)."""
+
+    _fields_ = [
+        ("hwnd", wt.HWND),
+        ("wFunc", wt.UINT),
+        ("pFrom", wt.LPCWSTR),  # double-NUL-terminated list
+        ("pTo", wt.LPCWSTR),
+        ("fFlags", wt.WORD),  # FILEOP_FLAGS
+        ("fAnyOperationsAborted", wt.BOOL),
+        ("hNameMappings", ctypes.c_void_p),
+        ("lpszProgressTitle", wt.LPCWSTR),
+    ]
+
+
+class SID_AND_ATTRIBUTES(ctypes.Structure):
+    _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wt.DWORD)]
+
+
+class TOKEN_MANDATORY_LABEL(ctypes.Structure):
+    _fields_ = [("Label", SID_AND_ATTRIBUTES)]
 
 
 class STARTUPINFOW(ctypes.Structure):
@@ -277,6 +316,12 @@ _sig(
 )
 _sig(userenv.CreateEnvironmentBlock, wt.BOOL, POINTER(ctypes.c_void_p), wt.HANDLE, wt.BOOL)
 _sig(userenv.DestroyEnvironmentBlock, wt.BOOL, ctypes.c_void_p)
+_sig(advapi32.GetSidSubAuthorityCount, POINTER(ctypes.c_ubyte), ctypes.c_void_p)
+_sig(advapi32.GetSidSubAuthority, POINTER(wt.DWORD), ctypes.c_void_p, wt.DWORD)
+
+# Shell
+_sig(shell32.SHFileOperationW, ctypes.c_int, POINTER(SHFILEOPSTRUCTW))
+_sig(kernel32.GetDriveTypeW, wt.UINT, wt.LPCWSTR)
 
 
 # --------------------------------------------------------------------------- marshalling helpers
@@ -322,3 +367,22 @@ def token_information_dword(token: int, info_class: int) -> int | None:
     if not advapi32.GetTokenInformation(token, info_class, byref(value), 4, byref(size)):
         return None
     return int(value.value)
+
+
+def token_integrity_rid(token: int) -> int | None:
+    """The token's integrity level (a ``SECURITY_MANDATORY_*_RID``), or ``None`` if unreadable."""
+    size = wt.DWORD()
+    advapi32.GetTokenInformation(token, TOKEN_INTEGRITY_LEVEL, None, 0, byref(size))
+    if last_error() != ERROR_INSUFFICIENT_BUFFER or not size.value:
+        return None
+    buf = ctypes.create_string_buffer(size.value)
+    if not advapi32.GetTokenInformation(token, TOKEN_INTEGRITY_LEVEL, buf, size.value, byref(size)):
+        return None
+    label = ctypes.cast(buf, POINTER(TOKEN_MANDATORY_LABEL)).contents
+    sid = label.Label.Sid
+    if not sid:
+        return None
+    count = advapi32.GetSidSubAuthorityCount(sid).contents.value
+    if not count:
+        return None
+    return int(advapi32.GetSidSubAuthority(sid, count - 1).contents.value)
