@@ -12,11 +12,11 @@
 | | |
 |---|---|
 | **Phase** | Phase 5: implementation |
-| **Sprint** | S2 ✅ approved 2026-10-29. **S3 is next** (M1: engine and the builtin converter). S0 closed (S0-3), S1 ✅ |
-| **Current task** | S2 approved and committed to `main` on 2026-10-29. Next: S3 file 1, `plugins/api.py` |
-| **Next** | S3 (engine and the builtin converter), in the phase-4 §9 order, with the S2 carry-overs listed under S3. RF-7 and RF-15 still open |
-| **Blocked on** | Nothing. Still open 👤, gating S7: C4, C9, C11, C21, C22 and the SignPath application. |
-| **Next approval stop** | End of S3 (A2) |
+| **Sprint** | S3 ✅ approved 2026-10-29 (M1 complete). **S4 is next** (M2: the final wheel). S0 closed (S0-3), S1 ✅, S2 ✅ |
+| **Current task** | S3 approved and committed to `main` on 2026-10-29. Next: S4 file 1, `ui/theme.py` |
+| **Next** | S4 (the final wheel). Carry-overs listed under S4 and S5. RF-7 and RF-11/13 still open |
+| **Blocked on** | Nothing. Still open 👤, gating S7: C4, C9, C11, C21, C22 and the SignPath application; new by-hand rows C23–C27 |
+| **Next approval stop** | End of S4 (A2) |
 
 ## Discovery phases
 
@@ -35,7 +35,7 @@
 | S0: Foundation | M0 | M | `[x]` closed 2026-10-29 (S0-3); C4/C9/C11 and SignPath carried as 👤 items to S7 |
 | S1: Pure core | M1 | M | `[x]` ✅ approved 2026-10-19 |
 | S2: OS hooks and dev wheel | M1 | M | `[x]` ✅ approved 2026-10-29 (C13–C20 synthetic; C21, C22 👤) |
-| S3: Engine and built-in converter | M1 | L | `[ ]` |
+| S3: Engine and built-in converter | M1 | L | `[x]` ✅ approved 2026-10-29 (C23–C27 👤) |
 | S4: Final wheel | M2 | L | `[ ]` |
 | S5: Toasts, tray, settings | M2 | L | `[ ]` |
 | S6: Plugin system | M3 | M | `[ ]` |
@@ -111,29 +111,39 @@
 - [x] Gates green: ruff, format, mypy, import-linter (R1, P1, P2), 422 tests
 
 ### S3: Engine and built-in converter (M1)
-- [ ] `plugins/api.py`
-- [ ] `plugins/manifest.py`
-- [ ] `engine/integrity.py`
-- [ ] `engine/file_ops.py`
-- [ ] `plugins/loader.py`
-- [ ] `builtin/pillow_images/plugin.toml`
-- [ ] `builtin/pillow_images/converter.py`
-- [ ] `engine/worker_main.py`
-- [ ] `engine/worker_pool.py`
-- [ ] `engine/dispatcher.py`
-- [ ] `platform/shell.py`
-- [ ] `engine/undo.py`
-- [ ] `engine/engines.py` (opt-in HEIC download, A6)
-- [ ] Minimal toast
-- [ ] Fixtures and integration tests
-- [ ] Define Compress for PNG; validate the quality defaults
-- [ ] Add import-linter contracts R2, R3 and R4
-- [ ] **Qt-free worker executable** (`morphwheel-worker.exe` + `set_executable`), because frozen workers load QtCore today (S0 Finding 1)
-- [ ] Carry-over from RF-3: `candidate_paths()` needs the **sniffed** `source_format`. Add `source_format` to `Task` (a phase-4 §4.1 contract change, so propose it), filled from the plan's `FileInfo`, so the worker doesn't sniff again or fall back to the file name
-- [ ] Carry-over from RF-10: `Task.options` is read-only (`MappingProxyType`), so don't use `dataclasses.asdict()` on a `Task`
-- [ ] Carry-over from S2: connect the dispatcher to `Controller.drop_received`; add the sniffer thread and the second `set_plan` in `WheelWindow.dragEnterEvent`; replace `dev_catalog()` and `missing_engines={HEIC}` with the manifest and the engine registry
-- [ ] Carry-over from S2 (security note): window classes are spoofable and OLE allows drags from lower-integrity windows. Before converting, consider checking the drag source's integrity level; keep outputs beside the source only
-- [ ] Carry-over from S2: `tools/drag_probe.py` reads `VK_LBUTTON` in its DragLeave check; honor `SM_SWAPBUTTON` (RD-5)
+- [x] `plugins/api.py` (+ `tests/unit/test_plugins_api.py`, 3)
+- [x] `plugins/manifest.py` (+ `test_manifest.py`, 30; the impostor builtin stays in the arc)
+- [x] `engine/integrity.py` (+ `test_integrity.py`, 8; the fingerprint carries the NTFS file id)
+- [x] `engine/file_ops.py` (+ `test_file_ops.py`, 12; delete-on-close placeholders, rename-only commits, RD-10)
+- [x] `plugins/loader.py` (+ `test_loader.py`, 5; the `broken` fixture plugin)
+- [x] `builtin/pillow_images/plugin.toml`
+- [x] `builtin/pillow_images/converter.py` (+ `tests/integration/test_converter.py`, 67)
+- [x] `engine/worker_main.py` (+ `test_worker_main.py`, 13; the tampering plugin → SOURCE_CHANGED)
+- [x] `engine/worker_pool.py` (+ `test_worker_pool.py`, 5, real processes: crash, timeout, respawn)
+- [x] `engine/dispatcher.py` (+ `tests/qt/test_dispatcher.py`, 5)
+- [x] `platform/shell.py` (+ `test_shell.py`, 2; recycle refuses drives without a Recycle Bin; Downloads via `platformdirs` in `settings/paths.py`)
+- [x] `engine/undo.py` (+ `test_undo.py`, 6)
+- [x] `engine/engines.py` (opt-in HEIC download, A6) (+ `test_engines.py`, 6; the real download proven once from source)
+- [x] Minimal toast: `ui/toasts/model.py`, `ui/toasts/manager.py` (+ `test_toasts.py`, 15)
+- [x] Fixtures and integration tests: `tests/fixtures/plugins/*`, `tests/integration/` (generated images, nothing binary checked in)
+- [x] Define Compress for PNG (RD-7); validate the quality defaults (table in the report)
+- [x] Add import-linter contracts R2, R3 and R4 (6 contracts kept)
+- [x] **Qt-free worker executable** (`morphwheel-worker.exe` + `set_executable`): built, and `morphwheel.exe --worker-check` on the frozen build shows both workers Qt-free (A5a)
+- [x] Carry-over from RF-3: `Task.source_format`, filled from the sniffed `FileInfo` (RD-9); the worker sniffs itself when it is `None`
+- [x] Carry-over from RF-10: no `asdict()` on a `Task` anywhere (the pipe carries the dataclass; `__getstate__` handles the options)
+- [x] Carry-over from S2: the dispatcher is connected to `Controller.drop_received`; the sniffer thread (`ui/wheel/sniffer.py`) and the second `set_plan`; `dev_catalog()` and `missing_engines={HEIC}` replaced by the manifest and the engine registry
+- [x] Carry-over from S2 (security note): the drag source's integrity level is checked at the press (RD-8); outputs stay beside the source (or in `Downloads\Morphwheel`)
+- [x] Carry-over from S2: `tools/drag_probe.py` honors `SM_SWAPBUTTON` in its DragLeave check (RD-5)
+- [x] Sprint report: [`docs/sprints/S3.md`](sprints/S3.md)
+
+**Exit criteria (phase-4 §9):**
+- [x] Criteria 1–4 of phase 2: 1 ✅ every writing test checks the source folder (👤 C23 by hand); 2–3 unchanged since S2 (synthetic); 4 ✅ 12 MP HEIC → JPG in 0.7 s
+- [x] Conversion-time target proposed: T7 (≤ 1.5 s for a 12 MP HEIC → JPG)
+- [x] The "malicious" plugin test leads to an alert (`SOURCE_CHANGED`, critical, sticky toast)
+- [x] Compress for PNG defined (RD-7); quality defaults validated on synthetic images
+- [x] Gates green: ruff, format, mypy (47 files), import-linter (R1, P1, P2, R2, R3, R4), 604 tests; frozen build 83 MB, Defender clean, `--worker-check` OK
+- [x] 👤 S3, RD-7 to RD-10 and T7 approved 2026-10-29
+- [ ] 👤 By hand C23–C27 (any time before S7)
 
 ### S4: Final wheel (M2)
 - [ ] `ui/theme.py`
@@ -142,10 +152,12 @@
 - [ ] `ui/wheel/window.py` (final)
 - [ ] Qt tests: alpha floor and hide-after-fade
 - [ ] M2 checks 1, 2, 3, 6, 9
+- [ ] Carry-over from S3: the sniffer's second `set_plan` repaints mid-drag; the final renderer keeps hover and arming across it (the session already does)
 
 ### S5: Surrounding UI (M2)
 - [ ] `settings/model.py` and `settings/store.py`
-- [ ] `ui/toasts/*`
+- [ ] `ui/toasts/*` (S3 shipped the text-only model and manager; add the buttons Show in folder, Undo, Details, the working toast for a single long file, and the final look)
+- [ ] Carry-over from S3: a download dialog for the HEIC engine (today `--install-heic` from a console, synchronous) and a catalog refresh after an install (today the app restarts); run the download off the GUI thread
 - [ ] `ui/tray.py`
 - [ ] `ui/settings_window.py`
 - [ ] `ui/onboarding.py`
@@ -159,7 +171,7 @@
 - [ ] `plugins/discovery.py`
 - [ ] `plugins/registry.py`
 - [ ] Plugins settings page and trust dialog
-- [ ] `sys.path` scoping in the loader
+- [ ] `sys.path` scoping in the loader (in place since S3: the plugin dir is appended; S6 adds the trust gate)
 - [ ] `examples/sample_plugin/`
 - [ ] `docs/plugins.md`
 - [ ] Crash and timeout tests
@@ -171,6 +183,7 @@
 - [ ] `packaging/winget/*`
 - [ ] `README.md`, `PRIVACY.md`, `SECURITY.md`, `CHANGELOG.md`, `THIRD_PARTY_NOTICES.md`
 - [ ] `docs/architecture.md`
+- [ ] Carry-over from S3: MERGE the two PYZ archives if size matters; `--worker-check` is the release smoke test for A5a; teach `tools/wheel_driver.py` the S3 log lines so C23 can be scripted
 - [ ] 👤 SignPath, publish the release, winget PR
 
 ---
@@ -199,7 +212,7 @@ Every fix has a regression test, and each test was seen to fail on the old code 
 | RF-12 | Low | `core/gesture.py:201` | Any event that isn't handled falls through and is treated as a `Tick`. Add an explicit branch plus `assert_never`. | ✅ |
 | RF-13 | Low | `core/wheel_session.py:261` | Hovering an EMPTY slot gives a DISABLED hub with `reason=None`. | Before S4 |
 | RF-14 | Low | `core/formats.py:129` | BMP is detected from `"BM"` alone, so non-images that start with `BM` are reclassified as BMP. | ✅ Also needs a DIB header size Pillow accepts (12–124) |
-| RF-15 | Low | `packaging/pyinstaller/file_version_info.txt:26` | The version resource says `OriginalFilename=morphwheel.exe` but is attached to `drag_probe.exe`. | S2 (when the entry switches) |
+| RF-15 | Low | `packaging/pyinstaller/file_version_info.txt:26` | The version resource says `OriginalFilename=morphwheel.exe` but is attached to `drag_probe.exe`. | ✅ S3: the spec builds `morphwheel.exe` (and `morphwheel-worker.exe`); the probe is no longer frozen |
 
 A code review of the fixes found 8 more issues. 5 are fixed, including a name like `Dr. Who`, which lost ` Who`, and a guard compare that didn't resolve paths. The other 3 became RD-1 and the S3 carry-overs above.
 
@@ -214,6 +227,9 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 | 2 | Apply to SignPath Foundation | Before S7 (S0-3) |
 | 3 | Run the manual drag checklist rows C4, C9 and C11 by hand (C11 at the physical machine). The synthetic passes close the other rows (S0-3) | Before S7 (S0-3) |
 | 6 | By hand, any time before S7: C21 (start the app from an administrator terminal, click *Restart normally*) and C22 (swapped mouse buttons) | Before S7 |
+| 7 | ~~Approve S3~~ ✅ 2026-10-29: S3, RD-7 to RD-10 and T7 approved; committed to `main` | Done |
+| 8 | By hand, any time before S7: C23 (a real conversion), C24 (mixed drag), C25 (already compact), C26 (read-only folder), C27 (HEIC with `--install-heic`). The download sends nothing but a request to PyPI's file host | Before S7 |
+| 9 | Optional: upload `morphwheel-worker.exe` (new in S3) to VirusTotal, like the S0 build (this sends the file to a third party) | Any time |
 | 4 | Optional: upload the build to VirusTotal (this sends the file to a third party) | End of S0 |
 | 5 | Decide whether to delete the temporary spike venv (`%LOCALAPPDATA%\Temp\twspk`, ~280 MB). Nothing uses it. | Any time |
 
@@ -221,11 +237,11 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 
 | Item | Sprint |
 |---|---|
-| ~~`import ssl` works in the frozen app after the RF-1 fix~~ ✅ OpenSSL 3.0.16, 62 root certs, no network used. A real HTTPS download is still unproven (S3, A6). | S0 |
+| ~~`import ssl` works in the frozen app after the RF-1 fix~~ ✅ OpenSSL 3.0.16, 62 root certs, no network used. ~~A real HTTPS download is still unproven (S3, A6).~~ ✅ proven from source in S3 | S0 |
 | ~~Worker cold start when frozen; `freeze_support` together with spawn~~ ✅ 0.17–0.20 s, works | S0 |
-| Separate Qt-free worker exe through `multiprocessing.set_executable` | S3 |
+| ~~Separate Qt-free worker exe through `multiprocessing.set_executable`~~ ✅ built and proven by `--worker-check` on the frozen build (A5a) | S3 |
 | ~~Memory use of the GUI plus 2 workers~~ ✅ 57 + 2×38.5 MB working set, frozen | S0 |
-| Loading the pillow-heif `cp312` wheel from inside the frozen app (A6) | S0/S3 |
+| Loading the pillow-heif `cp312` wheel from inside the frozen app (A6): ✅ from source (the download, the hash, the flat install and a 12 MP decode from an isolated interpreter). From the *frozen* worker: still unverified (needs the S5 dialog) | S0/S3 → S5 |
 | ~~"Restart normally" from an elevated window~~ implemented (RD-6); 👤 C21 proves it | S2 |
 | Per-element fade with no drop-transparent gap | S4 |
 | DROPDESCRIPTION, to show "Convert to JPG" instead of "Copy" | S4 |
@@ -233,6 +249,16 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 | Placing the onboarding bubble when the tray icon is in the overflow area | S5 |
 
 ## Work log (newest first)
+
+- **2026-10-29 (S3 built)**
+  - Plan written from phase-4 §4.4, §4.5 and §9, then attacked from two lenses before any code. The data-loss lens found two blocking holes in the §4.4 sketch (a killed worker leaving an empty `photo.jpg`; a 0-byte placeholder that isn't provably ours), fixed by delete-on-close placeholders and rename-only commits (RD-10). The process lens settled `set_executable` for a frozen child, the pool's wait on pipe plus sentinel, and the HEIC wheel's flat DLL layout.
+  - Files 1–13 in the §9 order, each with its tests; then the toasts, the sniffer, the application wiring, the integrity gate (RD-8), the probe's swapped-button fix, contracts R2–R4, and the two-executable spec. 604 tests (182 new; 92 integration tests with real files and real worker processes).
+  - The frozen build (83 MB) passes `--worker-check`: both workers run `morphwheel-worker.exe` with no Qt (A5a). Defender clean. Both exes carry `longPathAware`.
+  - A6 proven from source: the pinned wheel downloaded (6.6 MB, 1.2 s), hash matched, installed flat; a 12 MP HEIC decoded to JPG in 0.7 s from an isolated interpreter.
+  - Quality defaults measured (PSNR and size at each default and its neighbours) and Compress for PNG defined (RD-7). Conversion-time target proposed (T7).
+  - A code review (high effort) on the working tree found 8 items, all fixed (a stat on the GUI thread in DragEnter, a leak for all-skipped jobs, queued tasks running after shutdown, tasks hanging when no worker starts, a stuck job when the pool refuses, dead code, a clumsy helper, a duplicated fixture). The security review found nothing above its bar; three hardening notes applied (plain-text toast labels, the file id in Undo, the engine folder appended to `sys.path`). Four cleanup lenses: 26 of 30 findings applied, 4 skipped with reasons. The frozen build was rebuilt from the final sources and re-checked.
+  - Docs: S3 report, decisions RD-7 to RD-10 and T7, checklist rows C23–C27 and automated checks A4–A5, README (`--install-heic`), overview.
+  - Yuval approved S3 with RD-7 to RD-10 and T7 (A2). Committed to `main` at Yuval's request; not pushed.
 
 - **2026-10-29 (S0 closed, S2 started)**
   - Yuval lifted the S0-1 gate and closed S0 (S0-3). C4, C9, C11 and SignPath stay 👤 and gate S7.

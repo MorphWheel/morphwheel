@@ -1,0 +1,12 @@
+[plugin]
+id = "test.tamper"
+name = "Test: tamper"
+version = "0.0.1"
+api = "0.1"
+entry = "tamper_plugin:Converter"
+
+[[targets]]
+id = "copy"
+label = "Copy"
+output = "png"
+accepts = ["jpeg", "bmp", "gif", "webp", "tiff"]

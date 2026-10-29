@@ -17,15 +17,20 @@ from typing import Any
 
 from morphwheel.core.catalog import Target
 from morphwheel.core.errors import ErrorCode
+from morphwheel.core.formats import FileInfo, FormatId
 
 DEFAULT_HASH_LIMIT = 64 * 2**20  # sources up to 64 MB get a sha256 in the integrity check
 
 
 @dataclass(frozen=True)
 class DropRequest:
-    files: tuple[Path, ...]
+    files: tuple[FileInfo, ...]  # the local files, as the wheel knew them at the drop (S3)
     target_id: str
     received_at_ns: int
+
+    @property
+    def paths(self) -> tuple[Path, ...]:
+        return tuple(f.path for f in self.files)
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,9 @@ class Task:
     # Quality / compress preset. Values may be unhashable, so the options stay out of hash().
     options: Mapping[str, object] = field(default_factory=dict, hash=False)
     hash_limit_bytes: int = DEFAULT_HASH_LIMIT
+    # The sniffed format (S3, carry-over RF-3). None when no sniff ran before the drop; the worker
+    # then reads the header itself. Output names follow this, never the file name alone (RD-3).
+    source_format: FormatId | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
@@ -57,6 +65,7 @@ class CreatedFile:
     size: int
     mtime_ns: int
     source: Path
+    file_id: int = 0  # st_ino at commit time; 0 when unknown (Undo then checks size and mtime only)
 
 
 class TaskStatus(StrEnum):
@@ -77,6 +86,28 @@ class TaskResult:
     used_fallback: bool = False
     source_intact: bool = True  # integrity guard verdict
     duration_ms: float = 0.0
+
+    @classmethod
+    def failure(
+        cls,
+        task: Task,
+        code: ErrorCode,
+        detail: str | None = None,
+        *,
+        intact: bool = True,
+        duration_ms: float = 0.0,
+    ) -> TaskResult:
+        """A FAILED result for ``task``: one builder for the worker, pool and dispatcher."""
+        return cls(
+            task.job_id,
+            task.task_id,
+            task.source,
+            TaskStatus.FAILED,
+            error=code,
+            detail=detail,
+            source_intact=intact,
+            duration_ms=duration_ms,
+        )
 
 
 class JobOutcome(StrEnum):

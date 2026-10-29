@@ -1,0 +1,59 @@
+# The builtin image converter (phase-3 §2.2). Read by the GUI with tomllib; the converter module is
+# imported in worker processes only. The slots are honored because this manifest is found in the
+# bundled builtin/ directory, never because of its id.
+
+[plugin]
+id = "pillow_images"
+name = "Images (Pillow)"
+version = "0.1.0"
+api = "0.1"
+entry = "morphwheel.builtin.pillow_images.converter:PillowConverter"
+
+[[targets]]
+id = "jpeg"
+label = "JPG"
+output = "jpeg"
+accepts = ["png", "webp", "avif", "heic", "bmp", "tiff", "gif"]
+slot = "n"
+
+[[targets]]
+id = "png"
+label = "PNG"
+output = "png"
+accepts = ["jpeg", "webp", "avif", "heic", "bmp", "tiff", "gif"]
+slot = "ne"
+
+[[targets]]
+id = "webp"
+label = "WebP"
+output = "webp"
+accepts = ["jpeg", "png", "avif", "heic", "bmp", "tiff", "gif"]
+slot = "e"
+
+[[targets]]
+id = "avif"
+label = "AVIF"
+output = "avif"
+accepts = ["jpeg", "png", "webp", "heic", "bmp", "tiff", "gif"]
+slot = "se"
+
+[[targets]]
+id = "compress"
+label = "Compress"
+kind = "compress"
+accepts = ["jpeg", "png", "webp", "avif"]
+slot = "s"
+
+[[targets]]
+id = "pdf"
+label = "PDF"
+output = "pdf"
+accepts = ["jpeg", "png", "webp", "avif", "heic", "bmp", "tiff", "gif"]
+slot = "sw"
+
+[[targets]]
+id = "ico"
+label = "ICO"
+output = "ico"
+accepts = ["jpeg", "png", "webp", "avif", "heic", "bmp", "tiff", "gif"]
+slot = "w"

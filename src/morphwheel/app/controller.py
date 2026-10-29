@@ -21,6 +21,8 @@ Rules:
 - **Pause (phase-2 §3.1)** hides the wheel, resets the machine and stops the poller. While
   paused, presses are ignored.
 - **A press on our own window** is ignored; it can't start a gesture.
+- **A source below our integrity level is not a drag source** (RD-8, S3): the window class is
+  checked by the probe, and the process behind it by ``system.source_integrity_ok``.
 """
 
 from __future__ import annotations
@@ -76,6 +78,7 @@ class Controller(QObject):
         source_info: SourceProbe = window_probe.source_info_at,
         threshold: Callable[[int, int, int], tuple[int, int]] = system.drag_threshold_for,
         button_down: Callable[[], bool] = system.primary_button_down,
+        integrity_ok: Callable[[int], bool] = system.source_integrity_ok,
         cursor: Callable[[], tuple[int, int] | None] = _win32.cursor_pos,
         clock: Callable[[], int] = time.perf_counter_ns,
         parent: QObject | None = None,
@@ -88,6 +91,7 @@ class Controller(QObject):
         self._source_info = source_info
         self._threshold = threshold
         self._button_down = button_down
+        self._integrity_ok = integrity_ok
         self._cursor = cursor
         self._clock = clock
         self._machine = GestureMachine()
@@ -153,8 +157,12 @@ class Controller(QObject):
         info = self._source_info(x, y, any_source=self._any_source)
         if info.hwnd and info.hwnd == int(self._window.winId()):
             return  # a press on the wheel itself is never a drag source
-        event = PointerDown(self._clock(), x, y, info.allowed, self._threshold(info.hwnd, x, y))
-        log.debug("press at %s, allowed=%s, chain=%s", (x, y), info.allowed, info.chain)
+        allowed = info.allowed
+        if allowed and info.pid and not self._integrity_ok(info.pid):
+            log.warning("press in pid %d refused: lower integrity level than ours", info.pid)
+            allowed = False
+        event = PointerDown(self._clock(), x, y, allowed, self._threshold(info.hwnd, x, y))
+        log.debug("press at %s, allowed=%s, chain=%s", (x, y), allowed, info.chain)
         self._feed(event)
         # The poller may already be running (a press during the release grace): start from
         # "up" again, so a key held across gestures is an edge for this one too.

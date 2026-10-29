@@ -108,6 +108,12 @@ Live status: [`progress.md`](progress.md).
 - **A window shown in the middle of a drag** receives DragEnter within 9–51 ms. This was measured in the spike,
   over RDP.
 - **Pixels with alpha 0 let drops pass through.** Every catching area must have alpha 1 or more.
+- **PyInstaller's PySide6 runtime hook loads QtCore into every process started from the main exe.** The workers
+  therefore run from a second, Qt-free executable, `morphwheel-worker.exe` (A5a); `morphwheel.exe --worker-check`
+  proves it on a frozen build.
+- **An output is never written over anything.** The worker claims the output name with an exclusive create held
+  open with delete-on-close, writes a temp file beside it, and renames the temp at the end; a rename never
+  replaces an existing file (RD-10).
 - **Explorer sends no drag WinEvents**, and does not publish the dragged files on the clipboard.
 - **Environment:** the user works over RDP, where Windows animations are off. Real drag tests need an
   active interactive session.

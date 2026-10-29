@@ -9,8 +9,8 @@ by hand at the end of every sprint, and it grows as features land. Results go in
 - Use an **active, unlocked desktop session**. Over RDP, the session window must be open and in focus.
 - Run the probe from a normal terminal, **not as administrator**:
   - From source: `.venv\Scripts\python.exe tools\drag_probe.py`
-  - Frozen build: `packaging\output\dist\drag_probe\drag_probe.exe`. Build it with the command in
-    `packaging/pyinstaller/morphwheel.spec`.
+  - Frozen build (S3 and later): `packaging\output\dist\morphwheel\morphwheel.exe --debug`. Build it with the
+    command in `packaging/pyinstaller/morphwheel.spec`. The frozen probe is no longer built; the probe runs from source.
 - **Only drag throwaway copies.** Make a test folder, for example `C:\Temp\mw-test\`, with a few copied
   images. While Shift is held, Explorer's own default is *Move*. If a test fails before the overlay
   catches the drop, Explorer may move the file.
@@ -38,7 +38,7 @@ by hand at the end of every sprint, and it grows as features land. Results go in
 | C10 | Multiple monitors *(if available)* | Do C1 on each monitor, including one with different scaling | `SHOW … screen=<that monitor>`, and the overlay is centered on the cursor | S0 |
 | C11 | Local console timing | Do C1 and C2 **at the physical machine** (not over RDP) | Compare `ENTER` latency with the RDP numbers (9–51 ms in the spike) | S0 |
 | C12 | Frozen build | Do C1 with `drag_probe.exe` | Same as C1 | S0 |
-| C13 | Dev wheel: basic Shift-drag | Run the app from source: `.venv\Scripts\python.exe -m morphwheel --debug`. Drag a PNG copy, press Shift, drop on JPG | `morphwheel.log`: `press at … allowed=True`, `wheel shown`, `DragEnter: 1 url(s), plan ok`, `DropRequest: 1 file(s) -> jpeg`. Nothing converts yet (S3), and the file is unchanged | S2 |
+| C13 | Dev wheel: basic Shift-drag | Run the app from source: `.venv\Scripts\python.exe -m morphwheel --debug`. Drag a PNG copy, press Shift, drop on JPG | `morphwheel.log`: `press at … allowed=True`, `wheel shown`, `DragEnter: 1 url(s), plan ok`, `DropRequest: 1 file(s) -> jpeg`. The source file is unchanged (from S3 on, a JPG appears beside it: C23) | S2 |
 | C14 | Dev wheel: timing (criterion 2) | C13, five times | From the log timestamps: `wheel shown` ≤ 50 ms after the Shift sample, `DragEnter` ≤ 100 ms after `wheel shown` (p95 of the five) | S2 |
 | C15 | Hub repeats the target (C5) | C13, but hover JPG, then PNG, then the center before dropping | The hub reads `→ JPG`, then `Already this format` (PNG onto a PNG), then `✕ Cancel`; the hovered slot is highlighted | S2 |
 | C16 | Leave the halo, reopen | C13, but move the pointer well outside the ring, then press Shift again | The wheel hides when the pointer leaves the ring (`hide: left_halo`), and a new press of Shift shows it again | S2 |
@@ -48,6 +48,11 @@ by hand at the end of every sprint, and it grows as features land. Results go in
 | C20 | Unsupported drag | Drag a `.txt` copy, press Shift | Every slot dimmed, hub `⊘ Not supported`, no slot accepts the drop, release does nothing | S2 |
 | C21 | Elevated start, "Restart normally" | Start the app from an **administrator** terminal | The warning dialog appears. *Restart normally* starts a normal instance (`restarted without elevation` in the log, a new `Morphwheel … starting` line from the new process) and the elevated one quits. *Quit* exits with code 3. Record what happens if the restart fails (the "Couldn't start a normal instance" message) | S2 |
 | C22 | Swapped mouse buttons | Settings → Bluetooth & devices → Mouse → switch the primary button. Do C13 with the (now primary) right button. Switch back | `raw input registered (swapped buttons: True)`, and C13 passes with the right button | S2 |
+| C23 | A real conversion | C13 with a PNG copy dropped on JPG | `job <id>: 1 file(s) -> jpeg`, `… photo.png -> photo.jpg (<n> bytes, <ms> ms)`, `job <id> finished: success`. A `photo.jpg` sits beside the source, which is byte-for-byte unchanged (compare sizes and dates). A toast `✓ Converted to JPG` with `photo.jpg · <size> → <size>` appears bottom-right and fades after 6 s; hovering it pauses the fade | S3 |
+| C24 | Mixed drag with a skip | Drag a PNG and a JPG together onto JPG | `job … 2 file(s) -> jpeg (1 skipped)`; one new JPG; the toast reads `✓ 1 file converted to JPG` with `1 skipped — already JPG` | S3 |
+| C25 | Already compact | Drop a small, already-compressed JPG (quality ≤ 60) on Compress | `… failed with not_smaller`, `finished: already_compact`; no new file, no temp file left; toast `✓ Already compact` | S3 |
+| C26 | Read-only folder | Copy a PNG into a folder you can't write to (for example `C:\Program Files\<any>`, or a folder with a deny ACE), drop it on JPG | `… -> photo.jpg (…, fallback folder)`; the JPG is in `Downloads\Morphwheel`; the toast says `Saved to Downloads\Morphwheel — the source folder is read-only` | S3 |
+| C27 | HEIC with the opt-in engine | Without the engine, drag a `.heic`: every slot dimmed, hub `Needs the HEIC engine`. Run `morphwheel --install-heic`, restart the app, drag it again onto JPG | First: `missing engines: heic` at start-up and `plan not_supported`. After the install: `HEIC engine installed in …`, the restarted app logs `missing engines: none`, and the conversion runs like C23 | S3 |
 
 ## Scripted run (synthetic, S0-2)
 
@@ -131,3 +136,5 @@ padding starts a rubber-band selection, not a drag, so no DragEnter ever arrives
 | A1 | `force_copy` matrix: 126 combinations, never Move (`tests/unit/test_drop_guard.py`) | S0 |
 | A2 | `drag_probe.py measure`: frozen cold start, memory, Qt modules in workers | S0 |
 | A3 | Defender scan of the frozen build (`MpCmdRun -Scan -ScanType 3`) | S0 |
+| A4 | `morphwheel.exe --worker-check` on the frozen build: every worker reports `morphwheel-worker.exe` and `qt_loaded=False` (A5a) | S3 |
+| A5 | `pytest -m integration`: real worker processes, crash and timeout, the tampering plugin, a deny-ACE folder | S3 |

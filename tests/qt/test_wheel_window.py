@@ -193,7 +193,7 @@ def test_drop_on_a_slot_is_copy_and_emits_a_request(
     request = signals[0]
     assert isinstance(request, DropRequest)
     assert request.target_id == "jpeg"
-    assert request.files == (Path("C:/mw-test/photo.png"), Path("C:/mw-test/b.jpg"))
+    assert request.paths == (Path("C:/mw-test/photo.png"), Path("C:/mw-test/b.jpg"))
     assert request.received_at_ns == clock.now
 
 

@@ -1,0 +1,12 @@
+[plugin]
+id = "test.crash"
+name = "Test: crash"
+version = "0.0.1"
+api = "0.1"
+entry = "crash_plugin:Converter"
+
+[[targets]]
+id = "copy"
+label = "Copy"
+output = "png"
+accepts = ["jpeg", "bmp", "gif", "webp", "tiff"]

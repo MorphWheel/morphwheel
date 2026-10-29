@@ -149,3 +149,29 @@ def test_accessibility_switches_are_bools_with_safe_defaults(
     monkeypatch.setattr(w.user32, "SystemParametersInfoW", lambda *a: 0)  # the query fails
     assert system.animations_enabled() is True
     assert system.high_contrast() is False
+
+
+# ----------------------------------------------------------------------------- integrity (RD-8)
+def test_integrity_rule_is_exact() -> None:
+    medium, low, high = (
+        w.SECURITY_MANDATORY_MEDIUM_RID,
+        w.SECURITY_MANDATORY_LOW_RID,
+        w.SECURITY_MANDATORY_HIGH_RID,
+    )
+    assert system.integrity_ok(medium, medium)
+    assert system.integrity_ok(high, medium)  # an elevated source dragging into us: fine
+    assert not system.integrity_ok(low, medium)  # a sandboxed source: refused
+    assert system.integrity_ok(None, medium)  # unreadable: allowed, never breaks a drag
+    assert system.integrity_ok(low, None)
+
+
+def test_own_process_passes_and_bad_pids_read_as_unknown() -> None:
+    import os
+
+    own = system.own_integrity_level()
+    assert own in (w.SECURITY_MANDATORY_MEDIUM_RID, w.SECURITY_MANDATORY_HIGH_RID)
+    assert system.integrity_level(os.getpid()) == own
+    assert system.source_integrity_ok(os.getpid())
+    assert system.integrity_level(0) is None
+    assert system.integrity_level(-1) is None
+    assert system.source_integrity_ok(0)  # unknown → allowed

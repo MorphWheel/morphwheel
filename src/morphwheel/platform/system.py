@@ -17,6 +17,10 @@ Rules:
 - **Physical buttons.** Raw input and ``GetAsyncKeyState`` report the physical buttons whatever
   "Switch primary and secondary buttons" says, so :func:`primary_button_down` checks
   ``SM_SWAPBUTTON`` (phase-4 §4.3 review).
+- **Integrity levels (S3, RD-8).** Window classes are spoofable and OLE lets a lower-integrity
+  process (a sandboxed browser, an AppContainer) drag into our window. A drag whose source process
+  runs below our own integrity level is refused at the press (:func:`source_integrity_ok`); a
+  level we can't read is allowed, so a protected process can't break ordinary drags.
 
 Calls that take screen coordinates see virtualized values until a ``QGuiApplication`` exists, so
 :func:`drag_threshold_at` runs only after the application is built.
@@ -25,10 +29,12 @@ Calls that take screen coordinates see virtualized values until a ``QGuiApplicat
 from __future__ import annotations
 
 import ctypes
+import functools
 import logging
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from ctypes import byref
 from ctypes import wintypes as wt
 
@@ -40,20 +46,65 @@ SHELL_TRAY_CLASS = "Shell_TrayWnd"
 
 
 # --------------------------------------------------------------------------- elevation
-def elevation_type() -> int | None:
-    """``TOKEN_ELEVATION_TYPE_*`` of this process, or ``None`` if the token can't be read."""
+@contextmanager
+def _query_token(process: int) -> Iterator[int | None]:
+    """A ``TOKEN_QUERY`` handle on the process token, closed after; ``None`` if it can't open."""
     token = wt.HANDLE()
-    if not w.advapi32.OpenProcessToken(w.kernel32.GetCurrentProcess(), w.TOKEN_QUERY, byref(token)):
-        return None
+    if not w.advapi32.OpenProcessToken(process, w.TOKEN_QUERY, byref(token)):
+        yield None
+        return
     try:
-        return w.token_information_dword(int(token.value or 0), w.TOKEN_ELEVATION_TYPE)
+        yield int(token.value or 0)
     finally:
         w.kernel32.CloseHandle(token)
+
+
+def _own_token_query(read: Callable[[int], int | None]) -> int | None:
+    with _query_token(w.kernel32.GetCurrentProcess()) as token:
+        return None if token is None else read(token)
+
+
+def elevation_type() -> int | None:
+    """``TOKEN_ELEVATION_TYPE_*`` of this process, or ``None`` if the token can't be read."""
+    return _own_token_query(lambda t: w.token_information_dword(t, w.TOKEN_ELEVATION_TYPE))
 
 
 def is_elevated() -> bool:
     """True only for the full half of a split token: the case the startup warning is about."""
     return elevation_type() == w.TOKEN_ELEVATION_TYPE_FULL
+
+
+# --------------------------------------------------------------------------- integrity levels
+def integrity_level(pid: int) -> int | None:
+    """The mandatory integrity RID of process ``pid``, or ``None`` when it can't be read."""
+    if pid <= 0:
+        return None
+    process = w.kernel32.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not process:
+        return None
+    try:
+        with _query_token(int(process)) as token:
+            return None if token is None else w.token_integrity_rid(token)
+    finally:
+        w.kernel32.CloseHandle(process)
+
+
+@functools.cache
+def own_integrity_level() -> int | None:
+    """Our own level. It can't change for the life of the process, so it is read once."""
+    return _own_token_query(w.token_integrity_rid)
+
+
+def integrity_ok(source_level: int | None, own_level: int | None) -> bool:
+    """The pure rule: a source below us is refused; an unknown level on either side is allowed."""
+    if source_level is None or own_level is None:
+        return True
+    return source_level >= own_level
+
+
+def source_integrity_ok(pid: int) -> bool:
+    """Whether a drag from process ``pid`` may open the wheel (RD-8)."""
+    return integrity_ok(integrity_level(pid), own_integrity_level())
 
 
 def restart_command_line(extra_args: Sequence[str] = ()) -> str:

@@ -18,7 +18,8 @@ Safety rules, all of them tested offscreen:
   controller connects the signals queued, so hiding, logging and the job start happen after
   ``IDropTarget::Drop`` has returned.
 - **DragEnter does no I/O:** it reads ``urls()`` only, and plans by extension. The header sniff
-  comes in S3, on its own thread.
+  runs on the ``Sniffer`` thread (S3) and lands as a second ``set_plan`` through a queued signal,
+  unless the wheel hid or a newer DragEnter came in the meantime (a generation number).
 - **Alpha floor.** Every catching pixel (hub, gaps, slots, the halo) is painted with alpha ≥ 1,
   without antialiasing, so the edge pixels are no exception. Outside the halo nothing is painted.
 - **Hide clears the session.** Each ``show_at`` starts a new session (new arming, new timers).
@@ -65,6 +66,7 @@ from morphwheel.core.jobs import DropRequest
 from morphwheel.core.wheel_session import Accept, HubInfo, HubKind, SessionView, WheelSession
 from morphwheel.logs import timed
 from morphwheel.ui.wheel.drop_guard import assert_safe, force_copy, reject
+from morphwheel.ui.wheel.sniffer import Sniffer
 
 log = logging.getLogger("morphwheel.ui.wheel")
 
@@ -101,16 +103,19 @@ class WheelWindow(QWidget):
         size: WheelSize = "M",
         clock: Callable[[], int] = time.perf_counter_ns,
         cursor: Callable[[], QPoint] = QCursor.pos,
+        sniffer: Sniffer | None = None,
     ) -> None:
         super().__init__(None, _WINDOW_FLAGS)
         self._catalog = catalog
         self._clock = clock
         self._cursor = cursor
+        self._sniffer = sniffer if sniffer is not None else Sniffer(self)
+        self._sniffer.finished.connect(self.on_sniffed, Qt.ConnectionType.QueuedConnection)
+        self._generation = 0
         self._geometry = WheelGeometry.for_size(size)
         self._session: WheelSession | None = None
         self._view: SessionView | None = None
-        self._files: tuple[Path, ...] = ()
-        self._file_names: tuple[str, ...] = ()
+        self._files: tuple[FileInfo, ...] = ()  # local files only, as planned
         self._gave_up_sent = False
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -128,6 +133,15 @@ class WheelWindow(QWidget):
     @property
     def view(self) -> SessionView | None:
         return self._view
+
+    @property
+    def generation(self) -> int:
+        """Counts DragEnters; a sniff result for an older generation is ignored."""
+        return self._generation
+
+    def drop_files(self) -> tuple[FileInfo, ...]:
+        """The local files of the current drag, as last planned (sniffed when the sniff landed)."""
+        return self._files
 
     @property
     def wheel_size(self) -> WheelSize:
@@ -160,7 +174,7 @@ class WheelWindow(QWidget):
             more_center_deg=arc.center_deg if arc is not None else 315.0,
         )
         self._view = self._session.tick(t_ns)
-        self._files = self._file_names = ()
+        self._files = ()
         self._gave_up_sent = False
         self.show()
         log.debug(
@@ -176,7 +190,7 @@ class WheelWindow(QWidget):
         self.hide()
         self._session = None
         self._view = None
-        self._files = self._file_names = ()
+        self._files = ()
 
     def tick(self, t_ns: int) -> None:
         """Time passes: dwell, spinner and give-up. Driven by the poller's samples."""
@@ -189,20 +203,30 @@ class WheelWindow(QWidget):
         force_copy(event)  # always: an ignored DragEnter gets no DragMove
         if self._session is None:
             return
-        files: list[Path] = []
         infos: list[FileInfo] = []
         for url in event.mimeData().urls():
             if url.isLocalFile():
-                path = Path(url.toLocalFile())
-                files.append(path)
-                infos.append(FileInfo.from_path(path))
+                infos.append(FileInfo.from_path(Path(url.toLocalFile())))
             else:
                 infos.append(FileInfo.from_path(Path(url.toString()), is_local=False))
-        self._files = tuple(files)
-        self._file_names = tuple(p.name for p in files)
+        self._files = tuple(i for i in infos if i.is_local)
         plan = self._catalog.plan(infos)
         self._set_view(self._session.set_plan(plan))
         log.debug("DragEnter: %d url(s), plan %s", len(infos), plan.status)
+        self._generation += 1
+        self._sniffer.sniff(self._generation, infos)
+
+    def on_sniffed(self, generation: int, infos: object) -> None:
+        """The sniffer's result: re-plan with the real formats, unless it is stale."""
+        if self._session is None or generation != self._generation:
+            return
+        if not isinstance(infos, tuple):
+            return
+        refined: tuple[FileInfo, ...] = infos
+        self._files = tuple(i for i in refined if i.is_local)
+        plan = self._catalog.plan(refined)
+        self._set_view(self._session.set_plan(plan))
+        log.debug("sniff landed: plan %s", plan.status)
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         if self._session is None:
@@ -385,8 +409,8 @@ class WheelWindow(QWidget):
         return ""
 
     def _files_text(self, count: int) -> str:
-        if count == 1 and self._file_names:
-            return self._file_names[0]
+        if count == 1 and self._files:
+            return self._files[0].path.name
         return self.tr("%n files", "", count)
 
     def _reason_text(self, reason: Reason | None) -> str:

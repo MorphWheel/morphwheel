@@ -89,6 +89,7 @@ class FileInfo:
     animated: bool | None = None
     is_local: bool = True  # False for virtual files / URLs (not supported in the MVP)
     is_dir: bool = False
+    sniffed: bool = False  # True once the header was read: ``format`` then follows the bytes
 
     @classmethod
     def from_path(cls, path: Path, *, is_dir: bool = False, is_local: bool = True) -> FileInfo:
@@ -104,6 +105,7 @@ class FileInfo:
             self,
             format=result.format if result.format is not None else self.format,
             animated=result.animated,
+            sniffed=True,
         )
 
 

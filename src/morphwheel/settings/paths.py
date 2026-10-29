@@ -21,13 +21,20 @@ class AppPaths:
     data_dir: Path  # %LOCALAPPDATA%\Morphwheel (machine-local)
     logs_dir: Path  # …\logs\
     engines_dir: Path  # …\engines\ (opt-in downloads such as HEIC support, decision A6)
+    fallback_output_dir: Path  # Downloads\Morphwheel: outputs when the source folder is read-only
 
 
-def app_paths(*, roaming_base: Path | None = None, local_base: Path | None = None) -> AppPaths:
+def app_paths(
+    *,
+    roaming_base: Path | None = None,
+    local_base: Path | None = None,
+    downloads: Path | None = None,
+) -> AppPaths:
     """Return Morphwheel's locations for the current user.
 
-    ``roaming_base`` and ``local_base`` replace the per-user roots. Tests use them to point
-    everything at a temporary directory.
+    ``roaming_base`` and ``local_base`` replace the per-user roots, and ``downloads`` the user's
+    Downloads folder (otherwise the shell's known folder, which follows a redirection to OneDrive).
+    Tests use them to point everything at a temporary directory.
     """
     config_dir = (
         roaming_base / APP_NAME
@@ -39,6 +46,7 @@ def app_paths(*, roaming_base: Path | None = None, local_base: Path | None = Non
         if local_base is not None
         else Path(platformdirs.user_data_dir(APP_NAME, appauthor=False, roaming=False))
     )
+    downloads_dir = downloads if downloads is not None else Path(platformdirs.user_downloads_dir())
     return AppPaths(
         config_dir=config_dir,
         settings_file=config_dir / "settings.toml",
@@ -46,4 +54,5 @@ def app_paths(*, roaming_base: Path | None = None, local_base: Path | None = Non
         data_dir=data_dir,
         logs_dir=data_dir / "logs",
         engines_dir=data_dir / "engines",
+        fallback_output_dir=downloads_dir / APP_NAME,
     )
