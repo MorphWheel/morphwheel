@@ -18,6 +18,9 @@ by hand at the end of every sprint, and it grows as features land. Results go in
   tests you ran; the log holds the evidence.
 - The probe needs to see Shift go down **after** the drag starts. Pressing Shift before the click
   range-selects files in Explorer.
+- **S2 rows (C13 and up) use the app itself**, not the probe. Its log is
+  `%LOCALAPPDATA%\Morphwheel\logs\morphwheel.log`; `--debug` adds the per-press lines the rows quote. The
+  app has no tray yet: stop it with Ctrl+C in its terminal.
 
 ## Checklist
 
@@ -35,6 +38,16 @@ by hand at the end of every sprint, and it grows as features land. Results go in
 | C10 | Multiple monitors *(if available)* | Do C1 on each monitor, including one with different scaling | `SHOW … screen=<that monitor>`, and the overlay is centered on the cursor | S0 |
 | C11 | Local console timing | Do C1 and C2 **at the physical machine** (not over RDP) | Compare `ENTER` latency with the RDP numbers (9–51 ms in the spike) | S0 |
 | C12 | Frozen build | Do C1 with `drag_probe.exe` | Same as C1 | S0 |
+| C13 | Dev wheel: basic Shift-drag | Run the app from source: `.venv\Scripts\python.exe -m morphwheel --debug`. Drag a PNG copy, press Shift, drop on JPG | `morphwheel.log`: `press at … allowed=True`, `wheel shown`, `DragEnter: 1 url(s), plan ok`, `DropRequest: 1 file(s) -> jpeg`. Nothing converts yet (S3), and the file is unchanged | S2 |
+| C14 | Dev wheel: timing (criterion 2) | C13, five times | From the log timestamps: `wheel shown` ≤ 50 ms after the Shift sample, `DragEnter` ≤ 100 ms after `wheel shown` (p95 of the five) | S2 |
+| C15 | Hub repeats the target (C5) | C13, but hover JPG, then PNG, then the center before dropping | The hub reads `→ JPG`, then `Already this format` (PNG onto a PNG), then `✕ Cancel`; the hovered slot is highlighted | S2 |
+| C16 | Leave the halo, reopen | C13, but move the pointer well outside the ring, then press Shift again | The wheel hides when the pointer leaves the ring (`hide: left_halo`), and a new press of Shift shows it again | S2 |
+| C17 | Release over the hub | C13, but release over the center | The wheel hides at once (`hide: cancelled`), no `DropRequest`, file unchanged | S2 |
+| C18 | Esc | C13, but press Esc before releasing | `Esc pressed`; Explorer cancels the drag, which reaches the wheel as a DragLeave with the button still down, so it hides with `hide: left_halo`; no `DropRequest` | S2 |
+| C19 | Mixed drag | Drag a PNG and a JPG together onto JPG | Hub: `→ JPG` with `1 skipped`; `DropRequest: 2 file(s) -> jpeg` | S2 |
+| C20 | Unsupported drag | Drag a `.txt` copy, press Shift | Every slot dimmed, hub `⊘ Not supported`, no slot accepts the drop, release does nothing | S2 |
+| C21 | Elevated start, "Restart normally" | Start the app from an **administrator** terminal | The warning dialog appears. *Restart normally* starts a normal instance (`restarted without elevation` in the log, a new `Morphwheel … starting` line from the new process) and the elevated one quits. *Quit* exits with code 3. Record what happens if the restart fails (the "Couldn't start a normal instance" message) | S2 |
+| C22 | Swapped mouse buttons | Settings → Bluetooth & devices → Mouse → switch the primary button. Do C13 with the (now primary) right button. Switch back | `raw input registered (swapped buttons: True)`, and C13 passes with the right button | S2 |
 
 ## Scripted run (synthetic, S0-2)
 
@@ -76,6 +89,35 @@ The drops aim at the Compress slot (south) rather than JPG: at 200 % the JPG poi
 item list, over Explorer's command bar, and an echoed RDP cursor position there at press time could
 have clicked a toolbar button. `SHOW` comes about 550 ms after the press because the script holds
 still before pressing Shift; that number says nothing about the app.
+
+## Scripted run against the app (synthetic, S2)
+
+`tools/wheel_driver.py` reuses the driver's machinery but starts the app itself
+(`python -m morphwheel --debug`) and reads `morphwheel.log`. It drives rows C13–C20; C21 (UAC) and
+C22 (the mouse-button setting) stay by hand.
+
+```bash
+.venv\Scripts\python.exe tools\wheel_driver.py --dry-run
+.venv\Scripts\python.exe tools\wheel_driver.py
+```
+
+**2026-10-29, RDP, one monitor at 200 %, Windows 11 25H2.** One clean run after a fix to the driver
+itself (after Esc the wheel is already hidden, so the release goes over the item list). Every row's
+files unchanged (sha256). The drops aim at Compress (south) and WebP (east) for the same RDP reason
+as the S0 run:
+
+| Row | Result | Evidence |
+|---|---|---|
+| C18 | ✅ synthetic | `Esc pressed`; Explorer's DragLeave arrived with the button down → `hide: left_halo`; no `DropRequest` |
+| C13 | ✅ synthetic | `wheel shown` → `DragEnter: 1 url(s), plan ok` 10 ms later → `hover: slot:s hub=target compress` → `DropRequest: 1 file(s) -> compress, handled 0.6 ms after the drop` → `hide: dropped` |
+| C14 | ✅ synthetic | six wheels: shown 1.9–8.1 ms after the Shift key went down (the poller samples every 8 ms); five DragEnters 10–15 ms after `wheel shown` (p95 15 ms). Criterion 2: ≤ 50 ms and ≤ 100 ms |
+| C15 | ✅ synthetic | `hover: slot:n hub=target jpeg`, `hover: slot:ne hub=disabled png`, `hover: hub hub=cancel` |
+| C16 | ✅ synthetic | outside the ring: `hide: left_halo`; Shift again: a second `wheel shown`; no `DropRequest` |
+| C17 | ✅ synthetic | release over the hub: `hide: cancelled`, no `DropRequest` |
+| C19 | ✅ synthetic | PNG + WebP onto WebP: `DragEnter: 2 url(s)`, `hub=target webp`, `DropRequest: 2 file(s) -> webp` (the WebP is skipped in the plan) |
+| C20 | ✅ synthetic | a `.txt`: `DragEnter: 1 url(s), plan not_supported`, `hover: slot:s hub=not_supported -`, no `DropRequest`, hid on release |
+| C21 | 👤 | needs the UAC prompt |
+| C22 | 👤 | changes a system setting |
 
 Two RDP facts the driver works around, and anyone scripting drags over RDP should know:
 the client echoes earlier cursor positions back to the server for a while after injected moves

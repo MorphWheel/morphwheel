@@ -12,11 +12,11 @@
 | | |
 |---|---|
 | **Phase** | Phase 5: implementation |
-| **Sprint** | S1 ✅ approved. **S2 is next** (M1). S0 is code-complete; two of its 👤 items are still open (S0-1) |
-| **Current task** | Scripted drag run done (S0-2): C1–C3, C5–C8 and C12 pass synthetically in one clean run on 2026-10-28. Committed and pushed to `main` on 2026-10-28. |
-| **Next** | S2 (OS hooks and dev wheel), once the 👤 items below are done. RF-7 and RF-15 come with S2. |
-| **Blocked on** | **S2 is blocked** until the remaining S0 👤 items close: the real-hand checklist rows (C4, C9, C11, plus whether the synthetic passes count for the rest; S0-2) and the SignPath application. Repo and CI are ✅ done. |
-| **Next approval stop** | End of S2 (A2) |
+| **Sprint** | S2 ✅ approved 2026-10-29. **S3 is next** (M1: engine and the builtin converter). S0 closed (S0-3), S1 ✅ |
+| **Current task** | S2 approved and committed to `main` on 2026-10-29. Next: S3 file 1, `plugins/api.py` |
+| **Next** | S3 (engine and the builtin converter), in the phase-4 §9 order, with the S2 carry-overs listed under S3. RF-7 and RF-15 still open |
+| **Blocked on** | Nothing. Still open 👤, gating S7: C4, C9, C11, C21, C22 and the SignPath application. |
+| **Next approval stop** | End of S3 (A2) |
 
 ## Discovery phases
 
@@ -32,9 +32,9 @@
 
 | Sprint | Milestone | Size | Status |
 |---|---|---|---|
-| S0: Foundation | M0 | M | `[~]` code done, 👤 items open |
+| S0: Foundation | M0 | M | `[x]` closed 2026-10-29 (S0-3); C4/C9/C11 and SignPath carried as 👤 items to S7 |
 | S1: Pure core | M1 | M | `[x]` ✅ approved 2026-10-19 |
-| S2: OS hooks and dev wheel | M1 | M | `[ ]` |
+| S2: OS hooks and dev wheel | M1 | M | `[x]` ✅ approved 2026-10-29 (C13–C20 synthetic; C21, C22 👤) |
 | S3: Engine and built-in converter | M1 | L | `[ ]` |
 | S4: Final wheel | M2 | L | `[ ]` |
 | S5: Toasts, tray, settings | M2 | L | `[ ]` |
@@ -64,7 +64,7 @@
 - [x] CI is green on GitHub ([Actions](https://github.com/MorphWheel/morphwheel/actions)): about 1 minute on windows-latest
 - [x] The `force_copy` matrix passes
 - [x] Frozen-build measurements: worker cold start, idle memory, build size. Targets for criteria 5–6 are proposed in the report.
-- [ ] Integration checklist v1 executed (👤 real drags). **Scripted run 2026-10-28 (S0-2, synthetic):** C1, C2, C3, C5, C6, C7, C8 and C12 ✅; see the checklist. Still real-hand items:
+- [x] Integration checklist v1 executed. **Scripted run 2026-10-28 (S0-2, synthetic):** C1, C2, C3, C5, C6, C7, C8 and C12 ✅; see the checklist. Still real-hand items, carried to the S7 gate (S0-3):
   - [ ] Spike tests 4–6: C4 (Desktop as source) 👤; C5 and C6 ✅ synthetic
   - [ ] Esc: ✅ synthetic (C8); 👤 to confirm by hand
   - [ ] Elevated window in the foreground (C9)
@@ -72,7 +72,7 @@
   - [ ] **Re-measure on a local console session (not RDP)**
   - [x] Defender scan: no threats
 - [x] License audit of the frozen bundle: no pillow-heif inside ✅; license texts are missing, so S7 adds them
-- [ ] 👤 SignPath application submitted
+- [ ] 👤 SignPath application submitted (carried to the S7 gate, S0-3)
 
 ### S1: Pure core (M1)
 *`catalog.py` moved before `jobs.py`, because `Task` carries a `Target`.*
@@ -88,18 +88,27 @@
 - [x] Sprint report: [`docs/sprints/S1.md`](sprints/S1.md)
 
 ### S2: OS hooks and dev wheel (M1)
-- [ ] `platform/_win32.py`
-- [ ] `platform/system.py`
-- [ ] `platform/window_probe.py`
-- [ ] `platform/raw_input.py`
-- [ ] `platform/modifier_poller.py`
-- [ ] `ui/wheel/window.py` (basic renderer)
-- [ ] `app/controller.py` (partial)
-- [ ] `app/application.py`
-- [ ] "Restart normally" feasibility 🔶
-- [ ] Carry-over from S1: DragEnter **always** goes through `force_copy` (Qt sends no DragMove after an ignored DragEnter); `accepts_drop` governs DragMove and Drop only
-- [ ] Carry-over from S1: `more_center_deg` comes from `geometry.more_arc(center, screen, MORE_ARC_MAX)` (worst-case count)
-- [ ] Carry-over from S1: feed `GiveUp` to the gesture machine when the session reports `GAVE_UP`
+- [x] `platform/_win32.py` (+ `tests/unit/test_win32.py`, 19 tests; contracts P1 and P2)
+- [x] `platform/system.py` (+ `tests/unit/test_system.py`, 13 tests)
+- [x] `platform/window_probe.py` (+ `tests/unit/test_window_probe.py`, 13 tests)
+- [x] `platform/raw_input.py` (+ `tests/qt/test_raw_input.py`, 17 tests)
+- [x] `platform/modifier_poller.py` (+ `tests/qt/test_modifier_poller.py`, 14 tests)
+- [x] `ui/wheel/window.py` (basic renderer) (+ `tests/qt/test_wheel_window.py`, 23 tests)
+- [x] `app/controller.py` (partial) (+ `tests/qt/test_controller.py`, 11 scenarios)
+- [x] `app/application.py` (+ `tests/qt/test_application.py`, 6 tests)
+- [x] "Restart normally" feasibility 🔶 → implemented (RD-6); 👤 proven by hand in C21
+- [x] Carry-over from S1: DragEnter **always** goes through `force_copy` (`window.py`; tested)
+- [x] Carry-over from S1: `more_center_deg` comes from `geometry.more_arc(center, screen, MORE_ARC_MAX)` (`show_at`)
+- [x] Carry-over from S1: feed `GiveUp` to the gesture machine when the session reports `GAVE_UP` (`gave_up` signal → controller)
+- [x] Sprint report: [`docs/sprints/S2.md`](sprints/S2.md)
+
+**Exit criteria (phase-4 §9):**
+- [x] "Restart normally" feasibility checked: implemented (RD-6). 👤 C21 proves the click.
+- [x] Shift-drag from Explorer shows the dev wheel with a real slot plan: ✅ synthetic (C13, C15, C19, C20, 2026-10-29)
+- [x] A drop creates a `DropRequest` in the log: ✅ synthetic (C13)
+- [x] Timings: wheel ≤ 50 ms, DragEnter ≤ 100 ms p95: ✅ synthetic (C14: 8.1 ms max, 15 ms p95)
+- [ ] 👤 C21 (Restart normally from an elevated start) and C22 (swapped buttons) by hand
+- [x] Gates green: ruff, format, mypy, import-linter (R1, P1, P2), 422 tests
 
 ### S3: Engine and built-in converter (M1)
 - [ ] `plugins/api.py`
@@ -122,6 +131,9 @@
 - [ ] **Qt-free worker executable** (`morphwheel-worker.exe` + `set_executable`), because frozen workers load QtCore today (S0 Finding 1)
 - [ ] Carry-over from RF-3: `candidate_paths()` needs the **sniffed** `source_format`. Add `source_format` to `Task` (a phase-4 §4.1 contract change, so propose it), filled from the plan's `FileInfo`, so the worker doesn't sniff again or fall back to the file name
 - [ ] Carry-over from RF-10: `Task.options` is read-only (`MappingProxyType`), so don't use `dataclasses.asdict()` on a `Task`
+- [ ] Carry-over from S2: connect the dispatcher to `Controller.drop_received`; add the sniffer thread and the second `set_plan` in `WheelWindow.dragEnterEvent`; replace `dev_catalog()` and `missing_engines={HEIC}` with the manifest and the engine registry
+- [ ] Carry-over from S2 (security note): window classes are spoofable and OLE allows drags from lower-integrity windows. Before converting, consider checking the drag source's integrity level; keep outputs beside the source only
+- [ ] Carry-over from S2: `tools/drag_probe.py` reads `VK_LBUTTON` in its DragLeave check; honor `SM_SWAPBUTTON` (RD-5)
 
 ### S4: Final wheel (M2)
 - [ ] `ui/theme.py`
@@ -199,8 +211,9 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 |---|---|---|
 | 1 | ~~Create the GitHub org `morphwheel` and a public repo~~ ✅ 2026-10-19: Yuval created the org; the public repo [MorphWheel/morphwheel](https://github.com/MorphWheel/morphwheel) was created, with private vulnerability reporting on | Done |
 | 1b | ~~First commit and push~~ ✅ pushed to `main` at Yuval's request. Recommended: require 2FA for org members (Org settings → Authentication security) | Done (2FA: Yuval) |
-| 2 | Apply to SignPath Foundation | After #1 |
-| 3 | Run the manual drag checklist: C4, C9 and C11 (at the physical machine) by hand, and decide whether the synthetic passes for the other rows close them (S0-2) | End of S0 |
+| 2 | Apply to SignPath Foundation | Before S7 (S0-3) |
+| 3 | Run the manual drag checklist rows C4, C9 and C11 by hand (C11 at the physical machine). The synthetic passes close the other rows (S0-3) | Before S7 (S0-3) |
+| 6 | By hand, any time before S7: C21 (start the app from an administrator terminal, click *Restart normally*) and C22 (swapped mouse buttons) | Before S7 |
 | 4 | Optional: upload the build to VirusTotal (this sends the file to a third party) | End of S0 |
 | 5 | Decide whether to delete the temporary spike venv (`%LOCALAPPDATA%\Temp\twspk`, ~280 MB). Nothing uses it. | Any time |
 
@@ -213,13 +226,30 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 | Separate Qt-free worker exe through `multiprocessing.set_executable` | S3 |
 | ~~Memory use of the GUI plus 2 workers~~ ✅ 57 + 2×38.5 MB working set, frozen | S0 |
 | Loading the pillow-heif `cp312` wheel from inside the frozen app (A6) | S0/S3 |
-| "Restart normally" from an elevated window | S2 |
+| ~~"Restart normally" from an elevated window~~ implemented (RD-6); 👤 C21 proves it | S2 |
 | Per-element fade with no drop-transparent gap | S4 |
 | DROPDESCRIPTION, to show "Convert to JPG" instead of "Copy" | S4 |
 | Mica in settings; blur | S5 |
 | Placing the onboarding bubble when the tray icon is in the overflow area | S5 |
 
 ## Work log (newest first)
+
+- **2026-10-29 (S0 closed, S2 started)**
+  - Yuval lifted the S0-1 gate and closed S0 (S0-3). C4, C9, C11 and SignPath stay 👤 and gate S7.
+  - S2 plan written and reviewed (Win32 lens, timing and state lens). Struct sizes checked against the SDK in a spike.
+  - Review outcomes that shape S2: elevation is judged by the token's elevation *type* (UAC-off machines would otherwise loop through "Restart normally"); raw input and key state report *physical* buttons, so swapped buttons are handled through `SM_SWAPBUTTON`; the poller emits a `sampled` tick so the session's dwell, spinner and give-up timers advance while the pointer is still; drop/leave signals are queued so nothing heavy runs inside OLE's Drop.
+  - `platform/_win32.py` + 19 layout and marshalling tests. Contracts P1 (platform Qt-free except the two adapters) and P2 (ui has no Win32). Gates green, 323 tests.
+  - `platform/system.py` + 13 tests: elevation type, `restart_unelevated` (shell token → `CreateProcessWithTokenW`; the real click is a checklist row), per-DPI drag threshold with monitor and system fallbacks, swapped-button-aware `primary_button_down`, animation and High Contrast switches. 336 tests.
+  - `platform/window_probe.py` + 13 tests: the allow/deny table over class chains (rejected classes win), the chain walk proven on windows the test creates. 349 tests.
+  - `platform/raw_input.py` + 17 tests: `parse_raw_mouse` table (coalesced edges, swapped buttons, wheel, non-mouse), the filter logs once and never raises, `start()` reports instead of raising offscreen, `RIDEV_REMOVE` on stop. 366 tests.
+  - `platform/modifier_poller.py` + 14 tests: key table (inclusive keys), edges only, reset on start, `set_key` at the next sample, Esc edges, a `sampled(t_ns)` tick, the real timer fires. The timer test caught a real bug: `Signal(int)` is a 32-bit C int, so the tick carries a Python object. 380 tests.
+  - `ui/wheel/window.py` + 23 tests: the safety matrix at window level (DragEnter always Copy, DragMove/Drop only on selectable slots, never Move, a Move-only source refused at the door and in the handler, events without a session rejected), the alpha floor rendered to an image in five states (every catching pixel ≥ 1, outside 0), give-up once per session, size change only while hidden, no tooltips in the package. Finding: Qt routes a Drop only after an accepted DragEnter, which is one more reason DragEnter is always accepted. 403 tests.
+  - `app/controller.py` + 11 scenarios with a fake monitor, the real poller and the real window: C1 end to end with a logged `DropRequest`, release grace, release over the hub, leaving the halo and reopening, a rejected drop, give-up, disallowed sources and our own window, pause, the trigger key, stop, reset on a new press. 414 tests.
+  - `app/application.py` + 6 tests: argparse, the dev catalog (seven slots, HEIC blocked until its engine), the elevated gate with Restart normally / Quit and an explanation when the restart fails. Smoke run from source: boots, raw input registers.
+  - A code review (high effort) found 10 items; 9 fixed, 1 skipped (the dev catalog duplicates the test builders until S3's manifest replaces both). The real bug: a key held across two gestures never reopened the wheel, because the poller wasn't reset on a press during the release grace. The restart now loads the token's profile and environment. A security review of the ctypes and process-creation surface found nothing above its bar (the restart is a privilege drop; no dropped path is opened in S2); its note on lower-integrity drag sources is an S3 carry-over.
+  - Checklist rows C13–C22 added for the dev wheel. S2 report written. 422 tests.
+  - **Scripted drags against the app** (`tools/wheel_driver.py`, reusing `drag_driver.py`; two debug log lines added to the app for state changes and hover changes): C13–C20 pass in one clean run, files unchanged. Wheel shown 1.9–8.1 ms after Shift, DragEnter 10–15 ms after shown, the drop handler 0.5–0.6 ms. Esc arrives as a DragLeave with the button down (`left_halo`).
+  - Yuval approved S2 (A2). Committed and pushed to `main` at Yuval's request.
 
 - **2026-10-26 to 2026-10-28 (scripted drag run, S0-2)**
   - Built `tools/drag_driver.py` (SendInput, ctypes only) and `tools/uia_helper.ps1` (UI Automation, read-only). Approved as S0-2: synthetic results, marked as such.
