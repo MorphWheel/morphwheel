@@ -13,7 +13,7 @@
 |---|---|
 | **Phase** | Phase 5: implementation |
 | **Sprint** | S4 ✅ approved 2026-11-04 (the final wheel). **S5 is next** (toasts, tray, settings; M2). S3 ✅, S2 ✅, S1 ✅, S0 closed (S0-3) |
-| **Current task** | S4 approved 2026-11-04 with RD-11 to RD-14; not yet committed. Next: S5 file 1, `settings/model.py` and `settings/store.py` |
+| **Current task** | S4 approved and committed to `main` on 2026-11-04 (`4de616f`, CI green). Next: S5 file 1, `settings/model.py` and `settings/store.py` |
 | **Next** | S5 (toasts, tray, settings). Carry-overs listed under S5. RF-7 and RF-11 still open; RF-13 closed in S4 |
 | **Blocked on** | Nothing. Still open 👤, gating S7: C4, C9, C11, C21, C22 and the SignPath application; by-hand rows C23–C31 |
 | **Next approval stop** | End of S5 (A2) |
@@ -245,7 +245,7 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 | 7 | ~~Approve S3~~ ✅ 2026-10-29: S3, RD-7 to RD-10 and T7 approved; committed to `main` | Done |
 | 8 | By hand, any time before S7: C23 (a real conversion), C24 (mixed drag), C25 (already compact), C26 (read-only folder), C27 (HEIC with `--install-heic`). The download sends nothing but a request to PyPI's file host | Before S7 |
 | 9 | Optional: upload `morphwheel-worker.exe` (new in S3) to VirusTotal, like the S0 build (this sends the file to a third party) | Any time |
-| 10 | ~~Approve S4~~ ✅ 2026-11-04: S4 and RD-11 to RD-14 approved. Say whether to commit and push | Done (commit: Yuval) |
+| 10 | ~~Approve S4~~ ✅ 2026-11-04: S4 and RD-11 to RD-14 approved; committed and pushed to `main` at Yuval's request, CI green | Done |
 | 11 | By hand, any time before S7: C28 (drop during the appear animation), C29 (nothing catches after the fade), C30 (motion and look, on a local console), C31 (High Contrast and a scheme switch). C28 and C29 need `--motion on` over RDP | Before S7 |
 | 4 | Optional: upload the build to VirusTotal (this sends the file to a third party) | End of S0 |
 | 5 | Decide whether to delete the temporary spike venv (`%LOCALAPPDATA%\Temp\twspk`, ~280 MB). Nothing uses it. | Any time |
@@ -276,7 +276,7 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
   - A code review (high effort) found 7 items; 6 fixed (English plurals in the hub, a test for the floor under a painting failure, a frozen-view test that hid at opacity 0, content rebuilt per paint, the frame timer woken on every hover, a test-only wrapper), 1 skipped (shared pixel helpers across two suites). Four cleanup lenses (reuse, simplification, efficiency, altitude): the animator now owns the flash and the arc (no window-side animation state), the window has no frame copy and no content cache, the layer buffer is reused, fonts are built once, the floor path is cached, `Accept` carries the dropped slot, the tests share one fake clock and the session builders. Skipped with reasons: a shared High Contrast palette fixture (6 lines), inlining `Motion.ms`, dropping the defensive guard in the fade handler. The security review was not run: S4 adds no I/O, subprocess, download, plugin or ctypes surface.
   - UI pass: every phase-3 §3 state rendered to PNG and inspected in Light, Dark and High Contrast; one fix (the hub was tinted in the waiting state because the pointer sits at the center; the tint now belongs to the Cancel state only). Zero durations with animations off, High Contrast opaque with 2 px borders, strings through `tr()`, the wheel unmirrored (D3a).
   - Docs: S4 report, RD-11 to RD-14 proposed, checklist rows C28–C31 (with the `--motion on` note for RDP), README. Stopped for approval (A2); nothing committed.
-- **2026-11-04**: Yuval approved S4 with RD-11 to RD-14 (A2). Not committed yet.
+- **2026-11-04**: Yuval approved S4 with RD-11 to RD-14 (A2). Committed and pushed to `main` at Yuval's request (`4de616f`); CI green in 1m32s.
 
 - **2026-10-29 (S3 built)**
   - Plan written from phase-4 §4.4, §4.5 and §9, then attacked from two lenses before any code. The data-loss lens found two blocking holes in the §4.4 sketch (a killed worker leaving an empty `photo.jpg`; a 0-byte placeholder that isn't provably ours), fixed by delete-on-close placeholders and rename-only commits (RD-10). The process lens settled `set_executable` for a frozen child, the pool's wait on pipe plus sentinel, and the HEIC wheel's flat DLL layout.
