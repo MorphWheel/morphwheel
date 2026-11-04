@@ -37,6 +37,9 @@ py -3.12 -m venv .venv
 .venv\Scripts\lint-imports.exe
 ```
 
+Animations follow Windows' "Animation effects" switch; `--motion on` or `--motion off` forces them
+(the switch is off over Remote Desktop).
+
 HEIC input needs the opt-in engine: `.venv\Scripts\python.exe -m morphwheel --install-heic` downloads the
 pinned pillow-heif wheel (GPLv2, never bundled) into `%LOCALAPPDATA%\Morphwheel\engines`.
 

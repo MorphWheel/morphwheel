@@ -71,7 +71,7 @@ class Keys:
 class Rig:
     """One controller with every input under the test's control."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, motion: bool = False) -> None:
         self.now = 1_000_000_000
         self.cursor = (1200, 800)
         self.source = ALLOWED
@@ -79,8 +79,13 @@ class Rig:
         self.keys = Keys()
         self.monitor = FakeMonitor()
         self.poller = ModifierPoller(reader=self.keys, clock=lambda: self.now)
+        # Motion off by default: a hide is then synchronous (C7). The fade path has its own tests.
         self.window = WheelWindow(
-            Catalog.of(BUILTINS), clock=lambda: self.now, cursor=lambda: QPoint(600, 400)
+            Catalog.of(BUILTINS),
+            clock=lambda: self.now,
+            cursor=lambda: QPoint(600, 400),
+            motion_enabled=lambda: motion,
+            real_time=False,
         )
         self.drops: list[Any] = []
         self.controller = Controller(
@@ -351,3 +356,39 @@ def test_start_reports_missing_raw_input_and_connects_once(
     assert len([r for r in caplog.records if "raw input is not available" in r.message]) == 2
     monitor.pointer_down.emit(1, 1)
     assert len(seen) == 1  # one connection, not two
+
+
+# ----------------------------------------------------------------- with animations on (S4)
+def test_with_motion_on_a_drop_flashes_then_fades_and_hides() -> None:
+    rig = Rig(motion=True)
+    open_wheel(rig)
+    rig.sample(20)  # the appear animation is under way
+    assert rig.drag("n", "enter")
+    assert rig.drag("n", "move")
+    assert rig.drag("n", "drop")
+    assert rig.state is State.IDLE
+    assert len(rig.drops) == 1
+    assert rig.window.isVisible()  # fading: flash, then shrink and fade (phase-3 §8)
+    assert rig.window.fading
+    assert rig.window.session is None
+    assert not rig.drag("n", "move")  # events during the fade are rejected
+    assert rig.window.frame.flash[SlotPos.N] == 1.0  # the dropped slot flashes first
+    rig.now += 300 * 1_000_000
+    rig.window.animate()
+    assert not rig.window.isVisible()
+
+
+def test_with_motion_on_a_release_over_the_hub_fades_then_hides() -> None:
+    rig = Rig(motion=True)
+    open_wheel(rig)
+    rig.sample(20)
+    assert rig.drag("hub", "enter")
+    rig.release()
+    rig.drag("hub", "leave")  # OLE: DragLeave, not Drop, for a release over the hub
+    assert rig.state is State.IDLE
+    assert rig.window.isVisible()
+    assert rig.window.fading
+    rig.now += 100 * 1_000_000
+    rig.window.animate()
+    assert not rig.window.isVisible()
+    assert rig.drops == []

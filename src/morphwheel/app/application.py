@@ -90,6 +90,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument("--debug", action="store_true", help="verbose log, also on the console")
     parser.add_argument(
+        "--motion",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="wheel animations: auto follows Windows' animation switch (off over RDP)",
+    )
+    parser.add_argument(
         "--install-heic",
         action="store_true",
         help="download the opt-in HEIC engine (pillow-heif, GPLv2) to the engines folder and exit",
@@ -100,6 +106,15 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="start the worker processes, report their executable and whether Qt loaded, and exit",
     )
     return parser.parse_args(list(argv))
+
+
+def motion_switch(mode: str) -> Callable[[], bool]:
+    """``auto`` follows Windows' animation switch (C7); ``on`` and ``off`` force it (RDP tests)."""
+    if mode == "on":
+        return lambda: True
+    if mode == "off":
+        return lambda: False
+    return system.animations_enabled
 
 
 class Application:
@@ -150,7 +165,11 @@ class Application:
         self._pending: tuple[QScreen | None, str] = (None, "")  # the last drop's screen and label
         self._jobs: dict[str, _JobView] = {}
 
-        self.window = WheelWindow(self.catalog)
+        self.window = WheelWindow(
+            self.catalog,
+            motion_enabled=motion_switch(self.args.motion),
+            high_contrast=system.high_contrast,
+        )
         self.controller = Controller(
             RawInputMonitor(), ModifierPoller(), self.window, any_source=self.args.any_source
         )

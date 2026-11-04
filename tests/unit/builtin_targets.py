@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from morphwheel.core.catalog import SlotPos, Target, TargetKind
+from morphwheel.core.catalog import Catalog, SlotPos, Target, TargetKind
 from morphwheel.core.formats import FileInfo, FormatId
+from morphwheel.core.geometry import Point, WheelGeometry
+from morphwheel.core.wheel_session import WheelSession
 
 F = FormatId
 IMAGE_INPUTS = frozenset({F.JPEG, F.PNG, F.WEBP, F.AVIF, F.HEIC, F.BMP, F.TIFF, F.GIF})
@@ -46,6 +48,21 @@ def plugin(tid: str, accepts: set[FormatId] | None = None, **kw: object) -> Targ
     }
     args.update(kw)
     return Target(**args)  # type: ignore[arg-type]
+
+
+TWO_PNG_PLUGINS = Catalog.of(
+    [*BUILTINS, plugin("p0", {FormatId.PNG}), plugin("p1", {FormatId.PNG})]
+)
+
+
+def planned_session(
+    catalog: Catalog, files: tuple[str, ...], geometry: WheelGeometry | None = None
+) -> WheelSession:
+    """A session that appeared at the center at t=0 with ``files`` planned (none: waiting)."""
+    session = WheelSession(geometry or WheelGeometry(), appear_at=Point(0, 0), t0_ns=0)
+    if files:
+        session.set_plan(catalog.plan([file(n) for n in files]))
+    return session
 
 
 def file(name: str, **kw: object) -> FileInfo:
