@@ -18,6 +18,8 @@ by hand at the end of every sprint, and it grows as features land. Results go in
   tests you ran; the log holds the evidence.
 - The probe needs to see Shift go down **after** the drag starts. Pressing Shift before the click
   range-selects files in Explorer.
+- **Animations are off over RDP** (Windows' switch), so the fades and the appear animation never run there. Start
+  the app with `--motion on` to force them for C28 and C29; the 60 fps check (C30) needs a local console.
 - **S2 rows (C13 and up) use the app itself**, not the probe. Its log is
   `%LOCALAPPDATA%\Morphwheel\logs\morphwheel.log`; `--debug` adds the per-press lines the rows quote. The
   app has no tray yet: stop it with Ctrl+C in its terminal.
@@ -53,6 +55,10 @@ by hand at the end of every sprint, and it grows as features land. Results go in
 | C25 | Already compact | Drop a small, already-compressed JPG (quality ≤ 60) on Compress | `… failed with not_smaller`, `finished: already_compact`; no new file, no temp file left; toast `✓ Already compact` | S3 |
 | C26 | Read-only folder | Copy a PNG into a folder you can't write to (for example `C:\Program Files\<any>`, or a folder with a deny ACE), drop it on JPG | `… -> photo.jpg (…, fallback folder)`; the JPG is in `Downloads\Morphwheel`; the toast says `Saved to Downloads\Morphwheel — the source folder is read-only` | S3 |
 | C27 | HEIC with the opt-in engine | Without the engine, drag a `.heic`: every slot dimmed, hub `Needs the HEIC engine`. Run `morphwheel --install-heic`, restart the app, drag it again onto JPG | First: `missing engines: heic` at start-up and `plan not_supported`. After the install: `HEIC engine installed in …`, the restarted app logs `missing engines: none`, and the conversion runs like C23 | S3 |
+| C28 | Drop during the appear animation (M2 #1) | Start the app with `--motion on`. Shift-drag a PNG copy and drop it on JPG **at once**, within the 167 ms appear animation (press Shift and release in one motion) | `wheel shown … motion on`, `DragEnter`, `DropRequest … -> jpeg`, `hide: dropped`; the JPG is created and the source is unchanged. The floor catches from the first frame: nothing falls through to Explorer | S4 |
+| C29 | After the fade, nothing catches (M2 #9) | With `--motion on`: open the wheel, move out of the halo so it fades (`hide: left_halo`), move back to where the wheel was and release there, over the same Explorer folder | No `DragEnter` and no `DropRequest` after `hide: left_halo`; Explorer handles the release itself (a drop in the source folder does nothing). Esc instead of releasing is the safe variant | S4 |
+| C30 | Motion and look | On a **local console** (not RDP), `--motion auto`: open the wheel, hover slots, open More (hover NW for 250 ms), drop; repeat in Light and in Dark, and once with S and L from `apply_size` (S5 settings; until then `--debug` only) | Appear: scale 0.94 → 1 with a fade-in; labels replace the skeleton at DragEnter; the hovered slot turns accent and stands 4 px proud, the hub repeats `→ JPG`; the arc grows outward; the dropped slot flashes, then the wheel shrinks and fades; a release over the hub fades at once. No stutter in Explorer's drag image (M2 #6). Over RDP (`motion off`) every change is instant and nothing moves | S4 |
+| C31 | High Contrast and a scheme switch | Turn on a Windows High Contrast theme, open the wheel; turn it off, switch Light ↔ Dark in Settings, open the wheel again | High Contrast: opaque disc, 2 px borders, system colors, no shadow (`theme high_contrast`). After the switch the next wheel logs the new `theme` and uses the other token set | S4 |
 
 ## Scripted run (synthetic, S0-2)
 

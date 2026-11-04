@@ -40,6 +40,7 @@ from morphwheel.core.gesture import (
     DropDone,
     GestureMachine,
     GiveUp,
+    HideReason,
     HideWheel,
     ModifierState,
     PointerDown,
@@ -146,7 +147,7 @@ class Controller(QObject):
         self._poller.set_key(key)  # takes effect at the next sample (D8)
 
     def _reset(self) -> None:
-        self._window.hide_wheel()
+        self._window.hide_wheel(HideReason.RESET)
         self._machine = GestureMachine()
         self._sync()
 
@@ -240,7 +241,7 @@ class Controller(QObject):
                 self._window.show_at((command.x, command.y), self._clock())
             elif isinstance(command, HideWheel):
                 log.debug("hide: %s", command.reason)
-                self._window.hide_wheel()
+                self._window.hide_wheel(command.reason)
 
     def _sync(self) -> None:
         """Keep the poller and the motion reports in step with the machine's state."""

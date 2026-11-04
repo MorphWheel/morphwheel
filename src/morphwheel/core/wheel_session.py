@@ -16,7 +16,8 @@ Rules:
 - **Waiting.** Until DragEnter supplies a plan, the hub shows a spinner after
   ``SPINNER_AFTER_NS`` and gives up after ``GIVE_UP_AFTER_NS`` (phase-3 §4).
 - **C5.** The hub repeats the hovered target, because Explorer's drag thumbnail covers the slot
-  label.
+  label. An EMPTY slot with nothing to say (no target, no reason) is not a hover at all: it reads
+  like a gap (RF-13). More without plugins is EMPTY too, but it carries a reason the hub shows.
 - ``set_plan`` can be called twice: once by extension at DragEnter, and again after the async
   sniff. The second call keeps arming, hover and the More state.
 
@@ -29,7 +30,15 @@ import math
 from dataclasses import dataclass
 from enum import StrEnum
 
-from morphwheel.core.catalog import MORE_SLOT, Reason, SlotState, Target, WheelPlan
+from morphwheel.core.catalog import (
+    MORE_SLOT,
+    Reason,
+    SlotPos,
+    SlotState,
+    SlotStatus,
+    Target,
+    WheelPlan,
+)
 from morphwheel.core.geometry import MoreArc, Point, Region, RegionKind, WheelGeometry
 
 ARMING_DISTANCE = 12.0  # logical px (U7)
@@ -88,6 +97,7 @@ class CancelReason(StrEnum):
 class Accept:
     target: Target
     skip_count: int
+    slot: SlotPos | None = None  # the dropped slot; None for a More-arc item
 
 
 @dataclass(frozen=True)
@@ -154,7 +164,7 @@ class WheelSession:
         view = self._view()
         self._prev_region = view.region
         if view.accepts_drop and view.hover is not None and view.hover.target is not None:
-            return Accept(view.hover.target, view.hover.skip_count)
+            return Accept(view.hover.target, view.hover.skip_count, view.region.slot)
         if self.plan is None:
             return Cancel(CancelReason.NOT_READY)
         if not self.plan.ok:
@@ -223,6 +233,8 @@ class WheelSession:
                 hover = plan.slots[region.slot]
             elif region.kind is RegionKind.MORE_ITEM and region.item is not None:
                 hover = plan.more[region.item]
+            if hover is not None and hover.status is SlotStatus.EMPTY and hover.reason is None:
+                hover = None  # nothing there and nothing to say: it reads like a gap (RF-13)
         is_more_slot = region.kind is RegionKind.SLOT and region.slot is MORE_SLOT
         selectable = (
             plan is not None

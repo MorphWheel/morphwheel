@@ -21,11 +21,13 @@ from morphwheel.app.application import (
     EXIT_OK,
     Application,
     build_catalog,
+    motion_switch,
     parse_args,
 )
 from morphwheel.core.catalog import MORE_SLOT, SLOT_ORDER
 from morphwheel.core.formats import FileInfo, FormatId, Sniff
 from morphwheel.core.jobs import DropRequest, JobOutcome
+from morphwheel.platform import system
 from morphwheel.plugins.manifest import builtin_manifest
 from morphwheel.settings.paths import AppPaths
 from morphwheel.ui.toasts.model import ToastKind
@@ -160,3 +162,11 @@ def test_elevated_gate(app_paths_tmp: AppPaths, choice: str, restart_ok: bool, c
         assert explained == ([True] if choice == "restart" and not restart_ok else [])
     finally:
         _teardown(app)
+
+
+def test_motion_switch_follows_the_argument() -> None:
+    assert parse_args([]).motion == "auto"
+    assert parse_args(["--motion", "on"]).motion == "on"
+    assert motion_switch("on")() is True
+    assert motion_switch("off")() is False
+    assert motion_switch("auto") is system.animations_enabled

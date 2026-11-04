@@ -8,10 +8,9 @@ More arc".
 from __future__ import annotations
 
 import pytest
-from builtin_targets import BUILTINS, file, plugin
+from builtin_targets import BUILTINS, TWO_PNG_PLUGINS, file, planned_session
 
 from morphwheel.core.catalog import Catalog, Reason, SlotPos
-from morphwheel.core.formats import FormatId
 from morphwheel.core.geometry import MoreArc, Point, Region, RegionKind, WheelGeometry, polar
 from morphwheel.core.wheel_session import (
     ARMING_DISTANCE,
@@ -27,16 +26,15 @@ from morphwheel.core.wheel_session import (
 
 G = WheelGeometry()
 MS = 1_000_000
-PLUGINS = [plugin("p0", {FormatId.PNG}), plugin("p1", {FormatId.PNG})]
-WITH_PLUGINS = Catalog.of([*BUILTINS, *PLUGINS])
+WITH_PLUGINS = TWO_PNG_PLUGINS
+PLUGINS = [t for t in WITH_PLUGINS.targets if t not in BUILTINS]
 BUILTIN_ONLY = Catalog.of(BUILTINS)
 
 
 def armed_session(
     catalog: Catalog = WITH_PLUGINS, files: tuple[str, ...] = ("a.png",)
 ) -> WheelSession:
-    session = WheelSession(G, appear_at=Point(0, 0), t0_ns=0)
-    session.set_plan(catalog.plan([file(n) for n in files]))
+    session = planned_session(catalog, files, G)
     session.on_pointer(Point(0, -ARMING_DISTANCE - 1), 10 * MS)  # leave the center: armed
     return session
 
@@ -70,7 +68,7 @@ def test_edge_clamped_start_on_a_slot_needs_movement() -> None:
     assert session.decide_drop(start, MS) == Cancel(CancelReason.NOT_ARMED)
 
     moved = polar(10, 80)  # ~14 px along the same slot
-    assert session.decide_drop(moved, 2 * MS) == Accept(BUILTINS[0], 0)
+    assert session.decide_drop(moved, 2 * MS) == Accept(BUILTINS[0], 0, SlotPos.N)
 
 
 def test_arming_is_sticky() -> None:
@@ -111,7 +109,7 @@ def test_accept_reports_skips_in_a_mixed_drag() -> None:
     assert view.highlight_slot
     assert (view.hub.kind, view.hub.skip_count, view.hub.file_count) == (HubKind.TARGET, 1, 2)
     assert view.hub.target is BUILTINS[0]  # C5: the hub repeats the target
-    assert session.decide_drop(polar(0, 80), 21 * MS) == Accept(BUILTINS[0], 1)
+    assert session.decide_drop(polar(0, 80), 21 * MS) == Accept(BUILTINS[0], 1, SlotPos.N)
 
 
 # --------------------------------------------------------------------------- hub data
@@ -148,7 +146,7 @@ def test_more_opens_after_dwell_and_accepts_a_plugin_target() -> None:
     view = session.on_pointer(item0, 1_400 * MS)
     assert view.accepts_drop
     assert view.hub.target is PLUGINS[0]
-    assert session.decide_drop(item0, 1_401 * MS) == Accept(PLUGINS[0], 0)
+    assert session.decide_drop(item0, 1_401 * MS) == Accept(PLUGINS[0], 0)  # no slot: an arc item
 
     assert session.on_pointer(polar(0, 80), 1_500 * MS).more_arc is None  # back to a slot: close
 
@@ -187,3 +185,23 @@ def test_second_plan_keeps_arming_and_more_state() -> None:
     assert view.more_arc is not None
     assert view.plan is not None
     assert view.plan.slots[SlotPos.N].enabled
+
+
+# --------------------------------------------------------------------------- RF-13
+
+
+def test_hovering_an_empty_slot_reads_like_a_gap() -> None:
+    """RF-13: an EMPTY slot (no target there) must not give a DISABLED hub with no reason."""
+    jpeg_only = Catalog.of([BUILTINS[0]])  # only JPG is slotted: the other slots are EMPTY
+    session = WheelSession(G, appear_at=Point(0, 0), t0_ns=0)
+    session.set_plan(jpeg_only.plan([file("a.png")]))
+    view = session.on_pointer(polar(90, 80), 10 * MS)  # E: empty
+    assert view.region.slot is SlotPos.E
+    assert view.hover is None  # not a hover at all
+    assert view.hub.kind is HubKind.FILES
+    assert not view.highlight_slot
+    assert not view.accepts_drop
+    assert session.decide_drop(polar(90, 80), 20 * MS) == Cancel(CancelReason.DISABLED)
+    # The More slot with no plugins is EMPTY too, but it carries a reason the hub shows (§2.3).
+    view = session.on_pointer(polar(315, 80), 30 * MS)
+    assert (view.hub.kind, view.hub.reason) == (HubKind.DISABLED, Reason.NO_PLUGINS)

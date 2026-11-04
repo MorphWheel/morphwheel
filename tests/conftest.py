@@ -20,6 +20,23 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from morphwheel.settings.paths import AppPaths, app_paths
 
 
+class Clock:
+    """A fake monotonic clock in nanoseconds: tests step ``now`` and nothing else moves."""
+
+    START = 1_000_000_000
+
+    def __init__(self, now: int = START) -> None:
+        self.now = now
+
+    def __call__(self) -> int:
+        return self.now
+
+
+@pytest.fixture
+def clock() -> Clock:
+    return Clock()
+
+
 @pytest.fixture
 def app_paths_tmp(tmp_path: Path) -> AppPaths:
     """Morphwheel's locations, redirected into a per-test temporary directory."""

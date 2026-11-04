@@ -12,11 +12,11 @@
 | | |
 |---|---|
 | **Phase** | Phase 5: implementation |
-| **Sprint** | S3 ✅ approved 2026-10-29 (M1 complete). **S4 is next** (M2: the final wheel). S0 closed (S0-3), S1 ✅, S2 ✅ |
-| **Current task** | S3 approved and committed to `main` on 2026-10-29. Next: S4 file 1, `ui/theme.py` |
-| **Next** | S4 (the final wheel). Carry-overs listed under S4 and S5. RF-7 and RF-11/13 still open |
-| **Blocked on** | Nothing. Still open 👤, gating S7: C4, C9, C11, C21, C22 and the SignPath application; new by-hand rows C23–C27 |
-| **Next approval stop** | End of S4 (A2) |
+| **Sprint** | S4 ✅ approved 2026-11-04 (the final wheel). **S5 is next** (toasts, tray, settings; M2). S3 ✅, S2 ✅, S1 ✅, S0 closed (S0-3) |
+| **Current task** | S4 approved 2026-11-04 with RD-11 to RD-14; not yet committed. Next: S5 file 1, `settings/model.py` and `settings/store.py` |
+| **Next** | S5 (toasts, tray, settings). Carry-overs listed under S5. RF-7 and RF-11 still open; RF-13 closed in S4 |
+| **Blocked on** | Nothing. Still open 👤, gating S7: C4, C9, C11, C21, C22 and the SignPath application; by-hand rows C23–C31 |
+| **Next approval stop** | End of S5 (A2) |
 
 ## Discovery phases
 
@@ -36,7 +36,7 @@
 | S1: Pure core | M1 | M | `[x]` ✅ approved 2026-10-19 |
 | S2: OS hooks and dev wheel | M1 | M | `[x]` ✅ approved 2026-10-29 (C13–C20 synthetic; C21, C22 👤) |
 | S3: Engine and built-in converter | M1 | L | `[x]` ✅ approved 2026-10-29 (C23–C27 👤) |
-| S4: Final wheel | M2 | L | `[ ]` |
+| S4: Final wheel | M2 | L | `[x]` ✅ approved 2026-11-04 (C28–C31 👤) |
 | S5: Toasts, tray, settings | M2 | L | `[ ]` |
 | S6: Plugin system | M3 | M | `[ ]` |
 | S7: Release v0.1 | M4 | M | `[ ]` |
@@ -146,18 +146,33 @@
 - [ ] 👤 By hand C23–C27 (any time before S7)
 
 ### S4: Final wheel (M2)
-- [ ] `ui/theme.py`
-- [ ] `ui/wheel/renderer.py`
-- [ ] `ui/wheel/animator.py`
-- [ ] `ui/wheel/window.py` (final)
-- [ ] Qt tests: alpha floor and hide-after-fade
-- [ ] M2 checks 1, 2, 3, 6, 9
-- [ ] Carry-over from S3: the sniffer's second `set_plan` repaints mid-drag; the final renderer keeps hover and arming across it (the session already does)
+- [x] `ui/theme.py` (+ `tests/qt/test_theme.py`, 8: the WinUI tokens, High Contrast from the system palette, motion durations and the curve)
+- [x] `ui/wheel/renderer.py` (+ `test_renderer.py`, 137: the alpha floor in 7 states × 9 frames × 2 DPRs, the look, the layer cache, paint cost)
+- [x] `ui/wheel/animator.py` (+ `test_animator.py`, 18: the motion table, zero durations, the dismiss token, the real-time backstop)
+- [x] `ui/wheel/window.py` (final) (+ `test_wheel_window.py`, 59: the S2 safety matrix kept; the floor at mid-appear, mid-fade and mid-shrink frames; `hide()` after every fade; the floor survives a painting failure)
+- [x] Qt tests: alpha floor and hide-after-fade (above), plus two controller scenarios with motion on
+- [x] M2 checks 1, 3, 6, 9: 1 ✅ offscreen (every frame of the fade); 3 ✅ synthetic since S2 (C16, C17) and the halo pixels offscreen; 6 ✅ 3.0 ms per rebuilt frame, 0.2 ms per group-fade frame at 150 % (raster only; the live number is the DEBUG line at hide, C30 👤); 9: the floor hides with the window (offscreen) and 👤 C29 by hand
+- [x] M2 check 2 (DROPDESCRIPTION): feasibility only, deferred (RD-12). Qt exposes no `IDataObject`; the route is a platform-layer `IDropTarget` wrapper (see the S4 report)
+- [x] Carry-over from S3: the sniffer's second `set_plan` keeps arming, hover and the bulge (`test_the_second_plan_from_the_sniff_keeps_arming_and_hover`)
+- [x] RF-13 closed (RD-11): a reason-less EMPTY slot is not a hover; the hub keeps showing the files
+- [x] `--motion auto|on|off` (RD-14), so the fades can be hand-tested over RDP; the controller passes the hide reason; `app` injects Windows' animation and High Contrast switches (P2 kept)
+- [x] Checklist rows C28–C31; README (`--motion`)
+- [x] Sprint report: [`docs/sprints/S4.md`](sprints/S4.md)
+
+**Exit criteria (phase-4 §9):**
+- [x] Every phase-3 §3 state works: rendered offscreen and inspected (waiting, armed, hover, disabled hover, not supported, More open, halo, drop flash; Light, Dark, High Contrast)
+- [x] M2 checks 1, 2, 3, 6 and 9 (above; 2 deferred by RD-12; 9 and the live 60 fps number 👤)
+- [x] Gates green: ruff, format, mypy (50 files), import-linter (6 contracts), 807 tests
+- [x] 👤 S4 and RD-11 to RD-14 approved 2026-11-04
+- [ ] 👤 By hand C28–C31 (any time before S7)
 
 ### S5: Surrounding UI (M2)
 - [ ] `settings/model.py` and `settings/store.py`
 - [ ] `ui/toasts/*` (S3 shipped the text-only model and manager; add the buttons Show in folder, Undo, Details, the working toast for a single long file, and the final look)
 - [ ] Carry-over from S3: a download dialog for the HEIC engine (today `--install-heic` from a console, synchronous) and a catalog refresh after an install (today the app restarts); run the download off the GUI thread
+- [ ] Carry-over from S4: the toasts consume `ui/theme.py` (`Fonts.toast_*`, `Palette.critical/success/caution`) instead of their own S3 palette; the Fluent icons for Compress, PDF, More and Cancel once `qsvg` is back (today: text labels and the glyphs ⋯ ✕ ⊘)
+- [ ] Carry-over from S4: the settings dialog applies S/M/L only when the wheel is hidden; `apply_size` raises for up to 250 ms after a drop while the wheel fades (U4)
+- [ ] Carry-over from S4: a `WindowTransparentForInput` experiment for the 83–250 ms fade (RD-13), hand-tested; and the `ApplicationPaletteChange` event for a live accent change (today: re-read at each show)
 - [ ] `ui/tray.py`
 - [ ] `ui/settings_window.py`
 - [ ] `ui/onboarding.py`
@@ -210,7 +225,7 @@ Every fix has a regression test, and each test was seen to fail on the old code 
 | RF-10 | Low | `core/jobs.py:34` | `Task` is a frozen dataclass with a `dict` field, so `hash()` raises and the options can still be mutated. | ✅ Read-only options (copied), left out of `hash()`. Pickle and deepcopy still work. |
 | RF-11 | Low | `core/catalog.py:144` | `Catalog` is mutable, so changing its targets leaves the cached slots and arc stale. | Before S6 |
 | RF-12 | Low | `core/gesture.py:201` | Any event that isn't handled falls through and is treated as a `Tick`. Add an explicit branch plus `assert_never`. | ✅ |
-| RF-13 | Low | `core/wheel_session.py:261` | Hovering an EMPTY slot gives a DISABLED hub with `reason=None`. | Before S4 |
+| RF-13 | Low | `core/wheel_session.py:261` | Hovering an EMPTY slot gives a DISABLED hub with `reason=None`. | ✅ S4 (RD-11): a reason-less EMPTY slot is not a hover; the hub keeps the files line. More without plugins keeps its reason |
 | RF-14 | Low | `core/formats.py:129` | BMP is detected from `"BM"` alone, so non-images that start with `BM` are reclassified as BMP. | ✅ Also needs a DIB header size Pillow accepts (12–124) |
 | RF-15 | Low | `packaging/pyinstaller/file_version_info.txt:26` | The version resource says `OriginalFilename=morphwheel.exe` but is attached to `drag_probe.exe`. | ✅ S3: the spec builds `morphwheel.exe` (and `morphwheel-worker.exe`); the probe is no longer frozen |
 
@@ -230,6 +245,8 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 | 7 | ~~Approve S3~~ ✅ 2026-10-29: S3, RD-7 to RD-10 and T7 approved; committed to `main` | Done |
 | 8 | By hand, any time before S7: C23 (a real conversion), C24 (mixed drag), C25 (already compact), C26 (read-only folder), C27 (HEIC with `--install-heic`). The download sends nothing but a request to PyPI's file host | Before S7 |
 | 9 | Optional: upload `morphwheel-worker.exe` (new in S3) to VirusTotal, like the S0 build (this sends the file to a third party) | Any time |
+| 10 | ~~Approve S4~~ ✅ 2026-11-04: S4 and RD-11 to RD-14 approved. Say whether to commit and push | Done (commit: Yuval) |
+| 11 | By hand, any time before S7: C28 (drop during the appear animation), C29 (nothing catches after the fade), C30 (motion and look, on a local console), C31 (High Contrast and a scheme switch). C28 and C29 need `--motion on` over RDP | Before S7 |
 | 4 | Optional: upload the build to VirusTotal (this sends the file to a third party) | End of S0 |
 | 5 | Decide whether to delete the temporary spike venv (`%LOCALAPPDATA%\Temp\twspk`, ~280 MB). Nothing uses it. | Any time |
 
@@ -243,12 +260,23 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 | ~~Memory use of the GUI plus 2 workers~~ ✅ 57 + 2×38.5 MB working set, frozen | S0 |
 | Loading the pillow-heif `cp312` wheel from inside the frozen app (A6): ✅ from source (the download, the hash, the flat install and a 12 MP decode from an isolated interpreter). From the *frozen* worker: still unverified (needs the S5 dialog) | S0/S3 → S5 |
 | ~~"Restart normally" from an elevated window~~ implemented (RD-6); 👤 C21 proves it | S2 |
-| Per-element fade with no drop-transparent gap | S4 |
-| DROPDESCRIPTION, to show "Convert to JPG" instead of "Copy" | S4 |
+| ~~Per-element fade with no drop-transparent gap~~ ✅ S4: one content layer faded as a group over an unscaled alpha-1 floor, clipped to the halo. Proven offscreen in every state and frame (renderer: 126 combinations; window: mid-appear, mid-fade, mid-shrink; a 1 818-frame spike scanned every pixel). 👤 C28 by hand | S4 |
+| DROPDESCRIPTION, to show "Convert to JPG" instead of "Copy": **deferred** (RD-12). Qt gives the widget no `IDataObject`; the route is a ctypes `IDropTarget` wrapper around Qt's (OLE keeps it in the `OleDropTargetInterface` window property) that calls `IDataObject::SetData(CFSTR_DROPDESCRIPTION)` on DragEnter; platform-layer work plus a hand-tested drag | post-MVP |
+| The fading wheel keeps catching input for 83 ms (250 ms after a drop): a press there is swallowed, a re-entered drag gets "no drop" (RD-13). `WindowTransparentForInput` would need a hand-tested drag (changing flags on a shown window re-creates it) | S5 👤 |
+| `tests/qt/test_application.py` prints three "access violation" messages at teardown (the pool and the toasts; present before S4, the tests pass). Not isolated | S5 |
 | Mica in settings; blur | S5 |
 | Placing the onboarding bubble when the tray icon is in the overflow area | S5 |
 
 ## Work log (newest first)
+
+- **2026-11-02 (S4 built)**
+  - Plan written from phase-3 §2, §3, §7, §8 and phase-4 §4.6/§6/§9, then attacked from two lenses before any code. The drop-safety lens found no way to accept Move or fall through, and hardened the fade: the floor painted before anything is computed, a dismiss token so a stale fade can't hide a newer wheel, a real-time backstop, `windowOpacity()` asserted mid-fade. The Qt lens changed the design: one cached content layer faded as a group (no per-primitive double blending), everything after the floor clipped to the halo, timers injectable (orphan timers under a fake clock crash the suite), the last view frozen during the fade, hover keyed on `highlight_slot`, and "Segoe UI Variable" first (the "…Text" family resolves to Bold).
+  - A spike scanned every pixel of 1 818 frames (101 opacities × 3 scales × 3 DPRs × 2 formats, antialiased fills, a scaled edge line and text over an alpha-1 floor): worst alpha inside the halo 1, outside always 0.
+  - Files 1–4 in the §9 order, each with its tests; the controller passes the hide reason; `app` injects the animation and High Contrast switches and the `--motion` flag; RF-13 closed in core. 807 tests (203 new).
+  - A code review (high effort) found 7 items; 6 fixed (English plurals in the hub, a test for the floor under a painting failure, a frozen-view test that hid at opacity 0, content rebuilt per paint, the frame timer woken on every hover, a test-only wrapper), 1 skipped (shared pixel helpers across two suites). Four cleanup lenses (reuse, simplification, efficiency, altitude): the animator now owns the flash and the arc (no window-side animation state), the window has no frame copy and no content cache, the layer buffer is reused, fonts are built once, the floor path is cached, `Accept` carries the dropped slot, the tests share one fake clock and the session builders. Skipped with reasons: a shared High Contrast palette fixture (6 lines), inlining `Motion.ms`, dropping the defensive guard in the fade handler. The security review was not run: S4 adds no I/O, subprocess, download, plugin or ctypes surface.
+  - UI pass: every phase-3 §3 state rendered to PNG and inspected in Light, Dark and High Contrast; one fix (the hub was tinted in the waiting state because the pointer sits at the center; the tint now belongs to the Cancel state only). Zero durations with animations off, High Contrast opaque with 2 px borders, strings through `tr()`, the wheel unmirrored (D3a).
+  - Docs: S4 report, RD-11 to RD-14 proposed, checklist rows C28–C31 (with the `--motion on` note for RDP), README. Stopped for approval (A2); nothing committed.
+- **2026-11-04**: Yuval approved S4 with RD-11 to RD-14 (A2). Not committed yet.
 
 - **2026-10-29 (S3 built)**
   - Plan written from phase-4 §4.4, §4.5 and §9, then attacked from two lenses before any code. The data-loss lens found two blocking holes in the §4.4 sketch (a killed worker leaving an empty `photo.jpg`; a 0-byte placeholder that isn't provably ours), fixed by delete-on-close placeholders and rename-only commits (RD-10). The process lens settled `set_executable` for a frozen child, the pool's wait on pipe plus sentinel, and the HEIC wheel's flat DLL layout.
