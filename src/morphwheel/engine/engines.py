@@ -69,7 +69,14 @@ HEIC_ENGINE_SUBDIR = "heic"  # engines_dir / "heic" holds the opt-in pillow-heif
 
 
 class EngineInstallError(Exception):
-    """The download or the install failed. Nothing was installed."""
+    """The download or the install failed. Nothing was installed. ``kind`` says which step:
+    ``download`` (the network), ``mismatch`` (the pinned hash), ``archive`` (the wheel's
+    contents) or ``write`` (the engines folder), so the UI can say so in its own words. The
+    only exception ``install_heic`` raises."""
+
+    def __init__(self, message: str, kind: str = "archive") -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 # --------------------------------------------------------------------------- status
@@ -102,17 +109,21 @@ def install_heic(engines_dir: Path, *, fetch: Fetch | None = None) -> Path:
     if digest != HEIC_WHEEL.sha256:
         raise EngineInstallError(
             f"{HEIC_WHEEL.name}: the download doesn't match the pinned hash "
-            f"(got {digest[:16]}…); nothing was installed"
+            f"(got {digest[:16]}…); nothing was installed",
+            kind="mismatch",
         )
     target = heic_dir(engines_dir)
     staging = target.with_name(target.name + ".installing")
     shutil.rmtree(staging, ignore_errors=True)
-    staging.mkdir(parents=True)
     try:
+        staging.mkdir(parents=True)
         _extract(data, staging)
         if target.exists():
             shutil.rmtree(target)
         staging.rename(target)
+    except OSError as e:  # the folder, a locked DLL from a worker, the disk
+        shutil.rmtree(staging, ignore_errors=True)
+        raise EngineInstallError(f"couldn't write the engine folder: {e}", kind="write") from e
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -120,8 +131,12 @@ def install_heic(engines_dir: Path, *, fetch: Fetch | None = None) -> Path:
     return target
 
 
-def remove_heic(engines_dir: Path) -> None:
-    shutil.rmtree(heic_dir(engines_dir), ignore_errors=True)
+def remove_heic(engines_dir: Path) -> bool:
+    """Delete the engine. ``False`` when files a worker still holds remain (Windows keeps a
+    mapped DLL); they go at the next start, and the package itself is gone already."""
+    folder = heic_dir(engines_dir)
+    shutil.rmtree(folder, ignore_errors=True)
+    return not folder.exists()
 
 
 def _download(url: str) -> bytes:
@@ -130,7 +145,7 @@ def _download(url: str) -> bytes:
         with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_S) as response:
             data: bytes = response.read(HEIC_WHEEL.size + 1)
     except OSError as e:
-        raise EngineInstallError(f"download failed: {e}") from e
+        raise EngineInstallError(f"download failed: {e}", kind="download") from e
     return data
 
 

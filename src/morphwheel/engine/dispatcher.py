@@ -73,6 +73,10 @@ class JobDispatcher(QObject):
     def active_jobs(self) -> int:
         return len(self._jobs)
 
+    @property
+    def options(self) -> Mapping[str, object]:
+        return self._options
+
     def set_options(self, options: Mapping[str, object]) -> None:
         """Quality and compress presets for the tasks submitted from now on (S5 settings)."""
         self._options = dict(options)

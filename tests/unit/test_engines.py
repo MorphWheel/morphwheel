@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
-import io
-import zipfile
 from pathlib import Path
 
 import pytest
+from fake_heic import fake_wheel, pin
 
 from morphwheel.core.formats import FormatId
 from morphwheel.engine import engines
@@ -19,29 +17,6 @@ from morphwheel.engine.engines import (
     missing_engines,
     remove_heic,
 )
-
-
-def fake_wheel(*, extra: dict[str, bytes] | None = None, pyd: bool = True) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("pillow_heif/__init__.py", b"# fake\n")
-        z.writestr("pillow_heif/heif.py", b"\n")
-        if pyd:
-            z.writestr("_pillow_heif.cp312-win_amd64.pyd", b"MZ fake")
-        z.writestr("pillow_heif-1.8.1.data/platlib/libheif-abc.dll", b"MZ dll")
-        z.writestr("pillow_heif-1.8.1.dist-info/METADATA", b"Name: pillow-heif\n")
-        z.writestr("pillow_heif-1.8.1.dist-info/licenses/LICENSE.txt", b"GPL\n")
-        for name, data in (extra or {}).items():
-            z.writestr(name, data)
-    return buf.getvalue()
-
-
-def pin(monkeypatch: pytest.MonkeyPatch, data: bytes) -> None:
-    """Point the pinned spec's hash at ``data``, so a fake wheel passes verification."""
-    spec = engines.WheelSpec(
-        HEIC_WHEEL.name, HEIC_WHEEL.url, hashlib.sha256(data).hexdigest(), len(data), "pillow_heif"
-    )
-    monkeypatch.setattr(engines, "HEIC_WHEEL", spec)
 
 
 def test_install_verifies_then_lays_the_files_out_flat(
@@ -100,6 +75,22 @@ def test_zip_slip_and_incomplete_wheels_are_refused(
     pin(monkeypatch, garbage)
     with pytest.raises(EngineInstallError, match="not a wheel"):
         install_heic(tmp_path, fetch=lambda url: garbage)
+
+
+def test_an_unwritable_folder_is_a_write_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = fake_wheel()
+    pin(monkeypatch, data)
+    blocked = tmp_path / "engines"
+    blocked.write_bytes(b"not a folder")  # the engines "folder" is a file: mkdir fails
+    with pytest.raises(EngineInstallError) as raised:
+        install_heic(blocked, fetch=lambda url: data)
+    assert raised.value.kind == "write"
+    assert not (blocked.parent / "heic.installing").exists()
+    assert install_heic(tmp_path / "ok", fetch=lambda url: data).is_dir()
+    assert remove_heic(tmp_path / "ok") is True
+    assert remove_heic(tmp_path / "never") is True  # nothing there: nothing left
 
 
 def test_reinstall_replaces_the_old_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

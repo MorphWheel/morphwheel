@@ -17,6 +17,7 @@ htmlcov/
 build/
 dist/
 packaging/output/
+src/morphwheel/i18n/translations/*.qm
 
 # Logs and local runtime data
 *.log

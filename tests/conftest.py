@@ -10,10 +10,14 @@ from __future__ import annotations
 import getpass
 import os
 import subprocess
+import uuid
 from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 import pytest
+
+import translations  # tools/, on the path through pyproject's pythonpath
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -75,6 +79,175 @@ def lock_directory() -> Iterator[Callable[[Path], None]]:
             subprocess.run(
                 ["icacls", str(directory), "/remove:d", user], capture_output=True, check=False
             )
+
+
+def render_widget(widget: object) -> object:
+    """A widget painted into a transparent ``QImage``. Qt is imported lazily: unit tests stay pure.
+
+    The image is filled with alpha 0 first, so an assertion on a corner's alpha is about what the
+    widget painted and nothing else.
+    """
+    from PySide6.QtGui import QImage
+
+    image = QImage(widget.size(), QImage.Format.Format_ARGB32_Premultiplied)  # type: ignore[attr-defined]
+    image.fill(0)
+    widget.render(image)  # type: ignore[attr-defined]
+    return image
+
+
+@pytest.fixture(autouse=True)
+def recorded_autostart(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """No test touches the user's Run key: the app's autostart calls are recorded instead, and
+    the registry says "off". The unit tests of the module itself bind the real functions at
+    import time and run them against a throwaway key."""
+    from morphwheel.platform import autostart
+
+    asked: list[bool] = []
+
+    def sync(enabled: bool, **_: object) -> bool:
+        asked.append(enabled)
+        return True
+
+    monkeypatch.setattr(autostart, "sync", sync)
+    monkeypatch.setattr(autostart, "is_enabled", lambda **_: False)
+    return asked
+
+
+@pytest.fixture
+def instance_names() -> tuple[str, str]:
+    """A mutex and a pipe name for one test: never the real ones, never a running Morphwheel."""
+    token = uuid.uuid4().hex[:8]
+    return f"Local\\mw-test-{token}", f"mw-test-{token}"
+
+
+@pytest.fixture
+def unreadable() -> Callable[[Path], AbstractContextManager[None]]:
+    """``with unreadable(path):`` makes reading that one file fail like a sharing violation
+    (a sync client or a scanner holding it). Other files read normally."""
+
+    @contextmanager
+    def held(path: Path) -> Iterator[None]:
+        original = Path.read_bytes
+
+        def locked(self: Path) -> bytes:
+            if self == path:
+                raise PermissionError(32, "The process cannot access the file")
+            return original(self)
+
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(Path, "read_bytes", locked)
+            yield
+
+    return held
+
+
+@pytest.fixture
+def refused_saves() -> Callable[[], AbstractContextManager[None]]:
+    """``with refused_saves():`` makes every settings save fail (RD-15: reported, in force)."""
+
+    @contextmanager
+    def refusing() -> Iterator[None]:
+        import morphwheel.settings.store as store_module
+
+        def refused(path: Path, settings: object) -> None:
+            raise PermissionError(32, "The process cannot access the file")
+
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(store_module, "save_settings", refused)
+            yield
+
+    return refusing
+
+
+@pytest.fixture
+def rtl() -> Iterator[None]:
+    """The application mirrored (D3a) for one test; the session's qapp is put back afterwards."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    assert app is not None
+    app.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    try:
+        yield
+    finally:
+        app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+
+
+@pytest.fixture
+def opened_folders(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """What ``platform.shell`` asked the shell to open, instead of opening it (no Explorer)."""
+    from morphwheel.platform import shell
+
+    opened: list[Path] = []
+    monkeypatch.setattr(shell.os, "startfile", lambda p: opened.append(Path(p)))
+    return opened
+
+
+@pytest.fixture
+def temp_files() -> Callable[[Path], list[Path]]:
+    """The ``.tmp`` files left in a folder: an atomic writer must leave none behind."""
+
+    def scan(folder: Path) -> list[Path]:
+        return [p for p in folder.iterdir() if p.suffix == ".tmp"] if folder.exists() else []
+
+    return scan
+
+
+# ------------------------------------------------------------------ a right-to-left language
+HEBREW_TS = """<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="he" sourcelanguage="en">
+<context>
+    <name>Toast</name>
+    <message>
+        <source>Undo</source>
+        <translation>בטל</translation>
+    </message>
+    <message numerus="yes">
+        <source>%n file(s) converted to %1</source>
+        <translation>
+            <numerusform>קובץ אחד הומר ל-%1</numerusform>
+            <numerusform>%n קבצים הומרו ל-%1</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>Tray</name>
+    <message>
+        <source>Quit</source>
+        <translation>יציאה</translation>
+    </message>
+</context>
+</TS>
+"""
+
+
+def compile_hebrew(folder: Path) -> Path:
+    """``morphwheel_he.qm`` in ``folder``. Skips the test when ``lrelease`` isn't installed."""
+    (folder / "morphwheel_he.ts").write_text(HEBREW_TS, encoding="utf-8")
+    try:
+        [qm] = translations.release(folder)
+    except FileNotFoundError as e:
+        pytest.skip(str(e))
+    return qm
+
+
+@pytest.fixture(scope="session")
+def hebrew_catalog(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A folder with the tests' Hebrew catalog, compiled once per session."""
+    folder = tmp_path_factory.mktemp("catalog")
+    compile_hebrew(folder)
+    return folder
+
+
+@pytest.fixture
+def hebrew(hebrew_catalog: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The app's catalog folder is the Hebrew one for this test (``i18n.TRANSLATIONS_DIR``)."""
+    from morphwheel import i18n
+
+    monkeypatch.setattr(i18n, "TRANSLATIONS_DIR", hebrew_catalog)
+    return hebrew_catalog
 
 
 @pytest.fixture

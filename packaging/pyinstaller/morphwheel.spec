@@ -66,6 +66,9 @@ DATAS = [
         "morphwheel/builtin/pillow_images",
     )
 ]
+TRANSLATIONS = SRC / "morphwheel" / "i18n" / "translations"
+if any(TRANSLATIONS.glob("*.qm")):  # tools/translations.py release; an empty glob aborts
+    DATAS.append((str(TRANSLATIONS / "*.qm"), "morphwheel/i18n/translations"))
 
 gui = Analysis(  # noqa: F821
     [str(GUI_ENTRY)],

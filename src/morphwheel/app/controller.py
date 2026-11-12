@@ -134,14 +134,22 @@ class Controller(QObject):
         self._monitor.stop()
 
     def pause(self) -> None:
-        """Ignore drags until ``resume``. The current gesture, if any, ends now."""
+        """Ignore drags until ``resume``. The current gesture, if any, ends now. Idempotent."""
+        if self._paused:
+            return
         self._paused = True
         self._reset()
         log.info("paused")
 
     def resume(self) -> None:
+        if not self._paused:
+            return
         self._paused = False
         log.info("resumed")
+
+    @property
+    def trigger_key(self) -> TriggerKey:
+        return self._poller.key
 
     def set_trigger_key(self, key: TriggerKey) -> None:
         self._poller.set_key(key)  # takes effect at the next sample (D8)
