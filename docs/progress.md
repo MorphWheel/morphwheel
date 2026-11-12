@@ -289,7 +289,7 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 
 ## Work log (newest first)
 
-- **2026-11-12**: Yuval approved S5 with RD-15 to RD-24 (A2). Not committed.
+- **2026-11-12**: Yuval approved S5 with RD-15 to RD-24 (A2). Committed and pushed to main at Yuval request (bbde8b7). CI failed once: test_autostart expected a quoted exe path, and the runner path has no space, so the Run value is unquoted there; the test now compares against list2cmdline (710b93c), CI green.
 - **2026-11-12 (S5 file 8, S5 closed)**
   - Plan from the one phase-4 line, D3/D3a and phase-3 §6.2, spiked first: Qt's `lupdate` read our `tr("Tray", "text")` as the source "Tray" with the text as a comment and never saw the toasts' `_tr` (36 of 115 strings, all wrong), so the helper took Qt's own name and shape. The plan review found four blocking items: `QTranslator.load(QLocale.system(), …)` walks every language Windows lists (this machine would have picked a Hebrew catalog the day one ships), a default-argument seam that can't be patched, the key-label lookup tripping the guard, and the guard missing `QT_TRANSLATE_NOOP` and the class context of `self.tr`. All folded in before code.
   - UI pass: a toast rendered with a compiled Hebrew catalog on the Windows platform (offscreen has no fonts). One real finding: a Latin file name sat left-aligned with its indent on the wrong side under a right-aligned Hebrew title, because `QLabel` aligns "leading" by each line's own script; the toast now aligns to the layout's edge absolutely (`test_rtl_mirrors_the_layout` extended). Qt's Cancel and OK came along from `qtbase_he`.
