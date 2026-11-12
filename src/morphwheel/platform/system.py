@@ -33,6 +33,7 @@ import functools
 import logging
 import subprocess
 import sys
+import winreg
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from ctypes import byref
@@ -107,10 +108,14 @@ def source_integrity_ok(pid: int) -> bool:
     return integrity_ok(integrity_level(pid), own_integrity_level())
 
 
+def is_frozen() -> bool:
+    """The installed app (PyInstaller), as opposed to a run from source."""
+    return bool(getattr(sys, "frozen", False))
+
+
 def restart_command_line(extra_args: Sequence[str] = ()) -> str:
     """The command line that starts this app again: the frozen exe, or ``python -m morphwheel``."""
-    frozen = bool(getattr(sys, "frozen", False))
-    parts = [sys.executable] if frozen else [sys.executable, "-m", "morphwheel"]
+    parts = [sys.executable] if is_frozen() else [sys.executable, "-m", "morphwheel"]
     return subprocess.list2cmdline([*parts, *extra_args])
 
 
@@ -271,3 +276,23 @@ def high_contrast() -> bool:
     if not w.user32.SystemParametersInfoW(w.SPI_GETHIGHCONTRAST, hc.cbSize, byref(hc), 0):
         return False
     return bool(hc.dwFlags & w.HCF_HIGHCONTRASTON)
+
+
+_PERSONALIZE = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+
+
+def hkcu_value(key_path: str, name: str) -> object | None:
+    """A value under ``HKEY_CURRENT_USER``, or ``None`` when the key or the value isn't there."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            value: object = winreg.QueryValueEx(key, name)[0]
+    except OSError:
+        return None
+    return value
+
+
+def light_taskbar() -> bool:
+    """Whether the taskbar (the *Windows* mode, not the app mode) is light, so a tray icon can be
+    drawn dark on it. Unknown → False: Windows 11's default taskbar is dark."""
+    value = hkcu_value(_PERSONALIZE, "SystemUsesLightTheme")
+    return isinstance(value, int) and bool(value)  # a DWORD; anything else reads as dark

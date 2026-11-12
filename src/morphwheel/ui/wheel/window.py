@@ -45,7 +45,6 @@ import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
 
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
 from PySide6.QtGui import (
@@ -55,19 +54,21 @@ from PySide6.QtGui import (
     QDragMoveEvent,
     QDropEvent,
     QGuiApplication,
+    QHideEvent,
     QPainter,
     QPaintEvent,
 )
 from PySide6.QtWidgets import QWidget
 
-from morphwheel.core.catalog import MORE_ARC_MAX, Catalog, Reason, SlotPos
+from morphwheel.core.catalog import MORE_ARC_MAX, Catalog, Reason, SlotPos, WheelPlan
 from morphwheel.core.formats import FileInfo
 from morphwheel.core.geometry import Point, Rect, RegionKind, WheelGeometry
 from morphwheel.core.gesture import HideReason
 from morphwheel.core.jobs import DropRequest
 from morphwheel.core.wheel_session import Accept, HubInfo, HubKind, SessionView, WheelSession
 from morphwheel.logs import timed
-from morphwheel.ui.theme import Scheme, Theme, detect_scheme, system_accent
+from morphwheel.settings.model import WheelSize
+from morphwheel.ui.theme import Scheme, Theme, current_theme
 from morphwheel.ui.wheel.animator import WheelAnimator
 from morphwheel.ui.wheel.drop_guard import assert_safe, force_copy, reject
 from morphwheel.ui.wheel.renderer import (
@@ -82,7 +83,6 @@ from morphwheel.ui.wheel.sniffer import Sniffer
 
 log = logging.getLogger("morphwheel.ui.wheel")
 
-WheelSize = Literal["S", "M", "L"]
 DROP_BUDGET_MS = 5.0
 
 _WINDOW_FLAGS = (
@@ -98,6 +98,8 @@ class WheelWindow(QWidget):
     cancelled = Signal()
     drag_left = Signal()
     gave_up = Signal()
+    hidden = Signal()  # after every hide, including the end of a fade (C3)
+    engine_missing = Signal()  # a plan refused for the missing HEIC engine (A6); the app dedups
 
     def __init__(
         self,
@@ -123,6 +125,8 @@ class WheelWindow(QWidget):
         self._sniffer = sniffer if sniffer is not None else Sniffer(self)
         self._sniffer.finished.connect(self.on_sniffed, Qt.ConnectionType.QueuedConnection)
         self._generation = 0
+        self._size: WheelSize = size
+        self._pending_size: WheelSize | None = None  # asked for while visible; applied at the hide
         self._geometry = WheelGeometry.for_size(size)
         self._session: WheelSession | None = None
         self._view: SessionView | None = None
@@ -141,6 +145,7 @@ class WheelWindow(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)  # the slots stay put (D3a, U2)
         self.setAcceptDrops(True)
         edge = WheelGeometry.for_size("L").window_size  # sized for the largest state (C1)
         self.setFixedSize(edge, edge)
@@ -188,12 +193,26 @@ class WheelWindow(QWidget):
 
     @property
     def wheel_size(self) -> WheelSize:
-        return next(s for s in ("S", "M", "L") if WheelGeometry.for_size(s) == self._geometry)
+        return self._size
+
+    def set_catalog(self, catalog: Catalog) -> None:
+        """The targets from the next plan on (an engine came or went, A6). A live session re-plans
+        with it when its sniff lands: the same path a DragEnter takes, so a hub may flip."""
+        self._catalog = catalog
+
+    def _report_engine(self, plan: WheelPlan) -> None:
+        if plan.reason is Reason.ENGINE_MISSING:
+            self.engine_missing.emit()  # the app may offer the download (phase-4 A6 notes)
 
     def apply_size(self, size: WheelSize) -> None:
-        """Change the wheel size. Only while hidden (U4): a visible wheel keeps its hit regions."""
+        """Change the wheel size. Only while hidden (U4): a visible wheel keeps its hit regions,
+        so a change asked for while it shows or fades waits and lands right after the hide
+        (RD-16)."""
         if self.isVisible():
-            raise RuntimeError("the wheel size can only change while the wheel is hidden")
+            self._pending_size = None if size == self._size else size
+            return
+        self._pending_size = None
+        self._size = size
         self._geometry = WheelGeometry.for_size(size)
 
     def show_at(self, physical_xy: tuple[int, int], t_ns: int) -> None:
@@ -237,6 +256,12 @@ class WheelWindow(QWidget):
             self._theme.scheme.value,
         )
 
+    def hideEvent(self, event: QHideEvent) -> None:
+        super().hideEvent(event)
+        if self._pending_size is not None:
+            self.apply_size(self._pending_size)  # the wheel is hidden now: U4 allows it
+        self.hidden.emit()  # the toasts held back during the drag may show now (C1)
+
     def hide_wheel(self, reason: HideReason | None = None) -> None:
         """End the session now and fade out; the fade ends in ``hide()`` (C3).
 
@@ -275,6 +300,7 @@ class WheelWindow(QWidget):
         plan = self._catalog.plan(infos)
         self._set_view(self._session.set_plan(plan), self._clock())
         log.debug("DragEnter: %d url(s), plan %s", len(infos), plan.status)
+        self._report_engine(plan)
         self._generation += 1
         self._sniffer.sniff(self._generation, infos)
 
@@ -289,6 +315,7 @@ class WheelWindow(QWidget):
         plan = self._catalog.plan(refined)
         self._set_view(self._session.set_plan(plan), self._clock())
         log.debug("sniff landed: plan %s", plan.status)
+        self._report_engine(plan)
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         if self._session is None:
@@ -384,14 +411,7 @@ class WheelWindow(QWidget):
 
     # ----------------------------------------------------------------- theme
     def _build_theme(self) -> Theme:
-        if self._high_contrast():
-            scheme = Scheme.HIGH_CONTRAST
-        elif self._fixed_scheme is not None:
-            scheme = self._fixed_scheme
-        else:
-            scheme = detect_scheme(QGuiApplication.styleHints())
-        palette = QGuiApplication.palette()
-        return Theme.build(scheme, accent=system_accent(palette), system=palette)
+        return current_theme(self._high_contrast(), self._fixed_scheme)
 
     def _on_scheme_changed(self) -> None:
         self._theme = self._build_theme()
@@ -440,7 +460,7 @@ class WheelWindow(QWidget):
             return HubText("→ " + hub.target.label, bottom)
         if kind is HubKind.DISABLED:
             if hub.reason is Reason.IS_SOURCE and hub.target is not None:
-                return HubText(self.tr("{format} is the source").format(format=hub.target.label))
+                return HubText(self.tr("%1 is the source").replace("%1", hub.target.label))
             return HubText(self._reason_text(hub.reason))
         if kind is HubKind.MORE:
             return HubText(self.tr("More"))

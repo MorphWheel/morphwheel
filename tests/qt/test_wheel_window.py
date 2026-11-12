@@ -7,6 +7,7 @@ repeats it for the final renderer); "S/M/L only while hidden" (U4); "waiting: sp
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -17,8 +18,9 @@ from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QImage
 from PySide6.QtWidgets import QApplication
 
-from conftest import Clock
+from conftest import Clock, render_widget
 from morphwheel.core.catalog import MORE_SLOT, Catalog, SlotPos
+from morphwheel.core.formats import FormatId
 from morphwheel.core.geometry import WheelGeometry, polar
 from morphwheel.core.gesture import HideReason
 from morphwheel.core.jobs import DropRequest
@@ -120,25 +122,66 @@ def test_window_is_the_single_pre_created_drop_target(window: WheelWindow) -> No
     assert window.windowOpacity() == 1.0  # C3: never fade through window opacity
 
 
+# The one ``setToolTip`` allowed: the tray icon's, which the shell draws on hover over the taskbar
+# (phase-3 §6.1), never a window of ours over a drag (C1). ``QToolTip`` is allowed nowhere.
+SHELL_TOOLTIPS = {Path("ui/tray.py")}
+
+
+def test_a_missing_engine_is_reported_for_that_reason_only(clock: Clock, qtbot: Any) -> None:
+    """A6: the app may offer the download. Reported per plan (a DragEnter, a sniff landing), only
+    when the engine is the reason; the app keeps the once-per-run."""
+    without = Catalog.of(list(BUILTINS), missing_engines={FormatId.HEIC})
+    w = WheelWindow(without, clock=clock, cursor=lambda: QPoint(600, 400), real_time=False)
+    qtbot.addWidget(w)
+    reported: list[bool] = []
+    w.engine_missing.connect(lambda: reported.append(True))
+    w.show_at((1200, 800), T0)
+    enter(w, mime("photo.heic"))
+    assert reported == [True]
+    assert w.content().hub.top == "⊘ Not supported"
+    move(w, mime("photo.heic"), QPointF(100, 100))  # the same session: no repeat
+    assert reported == [True]
+    w.hide_wheel(HideReason.CANCELLED)
+    finish_fade(w, clock)
+    w.show_at((1200, 800), clock.now)
+    enter(w, mime("photo.png"))  # another reason, or none: nothing
+    w.hide_wheel(HideReason.CANCELLED)
+    finish_fade(w, clock)
+    assert reported == [True]
+    w.show_at((1200, 800), clock.now)
+    enter(w, mime("photo.heic"))  # a new session reports again
+    assert reported == [True, True]
+    w.hide_wheel(HideReason.CANCELLED)
+    finish_fade(w, clock)
+
+    w.set_catalog(Catalog.of(list(BUILTINS)))  # the engine arrived: the next session plans with it
+    w.show_at((1200, 800), clock.now)
+    enter(w, mime("photo.heic"))
+    assert reported == [True, True]
+    assert w.content().hub.top != "⊘ Not supported"
+    w.hide_wheel(HideReason.CANCELLED)
+    finish_fade(w, clock)
+
+
 def test_no_tooltips_anywhere_in_the_package() -> None:
     package = Path(__file__).resolve().parents[2] / "src" / "morphwheel"
-    offenders = [
-        p.relative_to(package)
-        for p in package.rglob("*.py")
-        if "QToolTip" in p.read_text(encoding="utf-8") or "setToolTip" in p.read_text("utf-8")
-    ]
-    assert offenders == []
+    sources = {p.relative_to(package): p.read_text(encoding="utf-8") for p in package.rglob("*.py")}
+    assert [p for p, text in sources.items() if "QToolTip" in text] == []
+    assert {p for p, text in sources.items() if "setToolTip" in text} == SHELL_TOOLTIPS
 
 
 def test_size_changes_only_while_hidden(window: WheelWindow, clock: Clock) -> None:
-    with pytest.raises(RuntimeError):
-        window.apply_size("L")
+    window.apply_size("L")  # visible: the change waits (RD-16)
+    assert window.wheel_size == "M"
+    window.apply_size("M")  # back to the current size: nothing waits any more
     clock.now += 300_000_000
     window.animate()  # fully shown; a hide now fades (an unseen wheel hides at once)
     window.hide_wheel()
-    with pytest.raises(RuntimeError):
-        window.apply_size("L")  # still visible: the fade is running (U4 holds for the fade too)
+    window.apply_size("S")  # still visible: the fade is running (U4 holds for the fade too)
+    assert window.wheel_size == "M"
     finish_fade(window, clock)
+    assert not window.isVisible()
+    assert window.wheel_size == "S"  # applied at the hide, not before
     window.apply_size("L")
     assert window.wheel_size == "L"
     assert window.width() == WheelGeometry.for_size("L").window_size  # the window never resizes
@@ -333,9 +376,8 @@ def test_each_show_starts_a_fresh_session(window: WheelWindow) -> None:
 
 # ----------------------------------------------------------------- the alpha floor (C2, C3)
 def render(window: WheelWindow) -> QImage:
-    image = QImage(window.size(), QImage.Format.Format_ARGB32_Premultiplied)
-    image.fill(Qt.GlobalColor.transparent)
-    window.render(image)
+    image = render_widget(window)
+    assert isinstance(image, QImage)
     return image
 
 
@@ -402,6 +444,11 @@ def test_every_catching_pixel_has_alpha_and_the_outside_has_none(
         assert alpha(image, x, y) == 0, f"{state}: {name} would catch drops"
 
 
+# The one window allowed to fade with its opacity: a toast is never a drop target (RD-17), so
+# the alpha floor (C3) doesn't apply to it. Any other window has to be listed here on purpose.
+NOT_DROP_TARGETS = {Path("ui/toasts/widget.py")}
+
+
 def test_window_opacity_is_never_used_anywhere_in_the_package() -> None:
     package = Path(__file__).resolve().parents[2] / "src" / "morphwheel"
     offenders = [
@@ -409,7 +456,8 @@ def test_window_opacity_is_never_used_anywhere_in_the_package() -> None:
         for p in package.rglob("*.py")
         if "setWindowOpacity" in p.read_text(encoding="utf-8")
     ]
-    assert offenders == []
+    assert set(offenders) == NOT_DROP_TARGETS  # the toasts, and nothing under ui/wheel
+    assert not any(str(p).startswith("ui" + os.sep + "wheel") for p in offenders)
 
 
 # ----------------------------------------------------------------- the fade and hide() (C3, S4)
@@ -602,6 +650,20 @@ def test_the_floor_is_painted_even_when_the_content_painter_fails(
         assert alpha(img, c.x() + g.halo_r + 2, c.y()) == 0
     assert alpha(image, c.x(), c.y()) == 1  # the floor alone: no content was painted
     assert len([r for r in caplog.records if "failed to paint" in r.message]) == 1  # once
+
+
+@pytest.mark.usefixtures("rtl")
+def test_the_wheel_never_mirrors(window: WheelWindow) -> None:
+    """D3a, U2: the slots stay where they are under a right-to-left language."""
+    m = mime("photo.png", "b.jpg")
+    enter(window, m)
+    move(window, m, at_slot(window, SlotPos.N))
+    assert window.layoutDirection() == Qt.LayoutDirection.LeftToRight
+    mirrored = render(window)
+    app = QApplication.instance()
+    assert app is not None
+    app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+    assert mirrored == render(window)  # pixel for pixel
 
 
 def test_hub_counts_read_as_proper_english(window: WheelWindow) -> None:

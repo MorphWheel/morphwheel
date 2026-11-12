@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from PySide6.QtCore import QEasingCurve, QPointF, Qt
-from PySide6.QtGui import QColor, QFont, QPalette, QStyleHints
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPalette, QStyleHints
 
 # WinUI durations (phase-3 §8), in milliseconds.
 FASTER_MS = 83
@@ -107,6 +107,20 @@ class Theme:
             base = accent if accent is not None and accent.isValid() else DEFAULT_ACCENT
             palette = _dark_palette(base) if scheme is Scheme.DARK else _light_palette(base)
         return cls(scheme, palette, _fonts())
+
+
+def current_theme(high_contrast: bool, fixed_scheme: Scheme | None = None) -> Theme:
+    """The theme for right now: High Contrast wins (the Windows switch, read by the caller),
+    then a pinned scheme (tests), then the platform's Light or Dark. The accent and the system
+    palette are read fresh too. Shared by the wheel and the toasts."""
+    if high_contrast:
+        scheme = Scheme.HIGH_CONTRAST
+    elif fixed_scheme is not None:
+        scheme = fixed_scheme
+    else:
+        scheme = detect_scheme(QGuiApplication.styleHints())
+    palette = QGuiApplication.palette()
+    return Theme.build(scheme, accent=system_accent(palette), system=palette)
 
 
 def detect_scheme(hints: QStyleHints) -> Scheme:
@@ -262,7 +276,7 @@ def _winui_curve() -> QEasingCurve:
     return curve
 
 
-_EASING = _winui_curve()
+EASING = _winui_curve()  # a value type: ``setEasingCurve`` copies it
 
 
 def ease(progress: float) -> float:
@@ -271,7 +285,7 @@ def ease(progress: float) -> float:
         return 0.0
     if progress >= 1.0:
         return 1.0
-    return _EASING.valueForProgress(progress)
+    return EASING.valueForProgress(progress)
 
 
 @dataclass(frozen=True)

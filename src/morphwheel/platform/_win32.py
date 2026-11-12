@@ -35,6 +35,7 @@ advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 shcore = ctypes.WinDLL("shcore", use_last_error=True)
 userenv = ctypes.WinDLL("userenv", use_last_error=True)
 shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+ole32 = ctypes.WinDLL("ole32", use_last_error=True)
 
 # --------------------------------------------------------------------------- constants
 # Window messages and raw input (winuser.h)
@@ -109,10 +110,13 @@ FOF_NOCONFIRMATION = 0x0010
 FOF_ALLOWUNDO = 0x0040
 FOF_NOERRORUI = 0x0400
 DRIVE_FIXED = 3
+COINIT_APARTMENTTHREADED = 0x2
+RPC_E_CHANGED_MODE = -2147417850  # 0x80010106: the thread is already in the other apartment
 INVALID_HANDLE_VALUE = wt.HANDLE(-1).value
 
 # Error codes
 ERROR_INSUFFICIENT_BUFFER = 122
+ERROR_ALREADY_EXISTS = 183  # CreateMutexW: another instance holds the name
 ERROR_INVALID_WINDOW_HANDLE = 1400
 ERROR_SERVICE_DISABLED = 1058
 
@@ -281,6 +285,8 @@ _sig(
 _sig(kernel32.GetCurrentProcess, wt.HANDLE)
 _sig(kernel32.OpenProcess, wt.HANDLE, wt.DWORD, wt.BOOL, wt.DWORD)
 _sig(kernel32.CloseHandle, wt.BOOL, wt.HANDLE)
+_sig(kernel32.CreateMutexW, wt.HANDLE, ctypes.c_void_p, wt.BOOL, wt.LPCWSTR)
+_sig(kernel32.ProcessIdToSessionId, wt.BOOL, wt.DWORD, POINTER(wt.DWORD))
 _sig(advapi32.OpenProcessToken, wt.BOOL, wt.HANDLE, wt.DWORD, POINTER(wt.HANDLE))
 _sig(
     advapi32.GetTokenInformation,
@@ -321,6 +327,18 @@ _sig(advapi32.GetSidSubAuthority, POINTER(wt.DWORD), ctypes.c_void_p, wt.DWORD)
 
 # Shell
 _sig(shell32.SHFileOperationW, ctypes.c_int, POINTER(SHFILEOPSTRUCTW))
+_sig(shell32.ILCreateFromPathW, ctypes.c_void_p, wt.LPCWSTR)  # a PIDL: a pointer, never an int
+_sig(shell32.ILFree, None, ctypes.c_void_p)
+_sig(
+    shell32.SHOpenFolderAndSelectItems,
+    ctypes.HRESULT,
+    ctypes.c_void_p,
+    wt.UINT,
+    ctypes.c_void_p,
+    wt.DWORD,
+)
+_sig(ole32.CoInitializeEx, ctypes.HRESULT, ctypes.c_void_p, wt.DWORD)
+_sig(ole32.CoUninitialize, None)
 _sig(kernel32.GetDriveTypeW, wt.UINT, wt.LPCWSTR)
 
 

@@ -151,6 +151,29 @@ def test_accessibility_switches_are_bools_with_safe_defaults(
     assert system.high_contrast() is False
 
 
+def test_light_taskbar_reads_the_windows_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert isinstance(system.light_taskbar(), bool)
+
+    def missing(*a: Any) -> Any:
+        raise FileNotFoundError(2, "no such value")
+
+    monkeypatch.setattr(system.winreg, "OpenKey", missing)  # no Personalize key: dark
+    assert system.light_taskbar() is False
+
+    class Key:
+        def __enter__(self) -> Key:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            pass
+
+    monkeypatch.setattr(system.winreg, "OpenKey", lambda *a: Key())
+    monkeypatch.setattr(system.winreg, "QueryValueEx", lambda *a: (1, 4))  # REG_DWORD 1
+    assert system.light_taskbar() is True
+    monkeypatch.setattr(system.winreg, "QueryValueEx", lambda *a: ("1", 1))  # REG_SZ: not ours
+    assert system.light_taskbar() is False
+
+
 # ----------------------------------------------------------------------------- integrity (RD-8)
 def test_integrity_rule_is_exact() -> None:
     medium, low, high = (

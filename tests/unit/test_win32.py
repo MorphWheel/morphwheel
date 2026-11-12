@@ -164,3 +164,17 @@ def test_token_queries_marshal() -> None:
         assert w.kernel32.CloseHandle(token)
     assert w.token_integrity_rid(0) is None  # negative control: no token
     assert not w.kernel32.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, False, 0)
+
+
+def test_shell_item_signatures_return_pointers() -> None:
+    """A PIDL truncated to a C int would corrupt the heap on 64-bit (the S5 review)."""
+    assert w.shell32.ILCreateFromPathW.restype is ctypes.c_void_p
+    assert w.shell32.ILFree.argtypes == [ctypes.c_void_p]
+    assert w.shell32.SHOpenFolderAndSelectItems.restype is ctypes.HRESULT
+    assert w.ole32.CoInitializeEx.restype is ctypes.HRESULT
+
+
+def test_mutex_and_session_signatures() -> None:
+    assert w.kernel32.CreateMutexW.restype is wt.HANDLE  # never a truncated int
+    assert w.kernel32.ProcessIdToSessionId.argtypes == [wt.DWORD, ctypes.POINTER(wt.DWORD)]
+    assert w.ERROR_ALREADY_EXISTS == 183

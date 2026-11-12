@@ -89,6 +89,7 @@ warn_unreachable = true
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = ["tests"]
+pythonpath = ["tools"]  # the tests of tools/translations.py import it
 addopts = "-ra --strict-markers --strict-config"
 qt_api = "pyside6"
 markers = [
@@ -110,6 +111,7 @@ forbidden_modules = [
     "ctypes",
     "morphwheel.app",
     "morphwheel.engine",
+    "morphwheel.i18n",
     "morphwheel.logs",
     "morphwheel.platform",
     "morphwheel.plugins",
@@ -118,7 +120,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "P1: platform is Qt-free except the two QObject adapters, and imports no other layer"
+name = "P1: platform is Qt-free except the three QObject adapters, and imports no other layer"
 type = "forbidden"
 source_modules = ["morphwheel.platform"]
 forbidden_modules = [
@@ -126,6 +128,7 @@ forbidden_modules = [
     "shiboken6",
     "morphwheel.app",
     "morphwheel.engine",
+    "morphwheel.i18n",
     "morphwheel.plugins",
     "morphwheel.settings",
     "morphwheel.ui",
@@ -133,9 +136,8 @@ forbidden_modules = [
 ignore_imports = [
     "morphwheel.platform.raw_input -> PySide6",
     "morphwheel.platform.modifier_poller -> PySide6",
+    "morphwheel.platform.single_instance -> PySide6",
 ]
-# Warn, not fail, while a listed adapter doesn't exist yet (S2 lands them one at a time).
-unmatched_ignore_imports_alerting = "warn"
 
 [[tool.importlinter.contracts]]
 name = "P2: ui has no Win32 and wires nothing itself"
@@ -170,6 +172,7 @@ forbidden_modules = [
     "morphwheel.app",
     "morphwheel.platform",
     "morphwheel.engine.dispatcher",
+    "morphwheel.i18n",
 ]
 
 [[tool.importlinter.contracts]]
@@ -186,6 +189,7 @@ forbidden_modules = [
     "morphwheel.builtin",
     "morphwheel.core",
     "morphwheel.engine",
+    "morphwheel.i18n",
     "morphwheel.logs",
     "morphwheel.platform",
     "morphwheel.plugins.loader",
@@ -202,5 +206,6 @@ layers = [
     "morphwheel.ui | morphwheel.platform",
     "morphwheel.engine | morphwheel.builtin",
     "morphwheel.plugins",
-    "morphwheel.core | morphwheel.settings | morphwheel.logs",
+    # i18n is Qt-only; the worker side (R2), core, platform and plugins.api never import it
+    "morphwheel.core | morphwheel.settings | morphwheel.logs | morphwheel.i18n",
 ]
