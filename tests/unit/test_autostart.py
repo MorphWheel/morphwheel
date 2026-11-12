@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import uuid
 import winreg
@@ -48,8 +49,7 @@ def test_the_installed_app_writes_its_own_command(keys: tuple[str, str]) -> None
     run_key, approved_key = keys
     command = command_line()
     assert command is not None
-    assert command.startswith('"')
-    assert command.endswith('"')
+    assert command == subprocess.list2cmdline([sys.executable])  # quoted only with a space
     assert not is_enabled(run_key=run_key, approved_key=approved_key)
     assert sync(True, run_key=run_key, approved_key=approved_key)
     assert _value(run_key) == command
