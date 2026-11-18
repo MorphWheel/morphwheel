@@ -298,7 +298,7 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 
 ## Work log (newest first)
 
-- **2026-11-18**: Yuval approved S6 with RD-25, RD-26 and RD-28 (A2). Not committed yet.
+- **2026-11-18**: Yuval approved S6 with RD-25, RD-26 and RD-28 (A2). Committed and pushed to main at Yuval's request (20024a7); CI green on the first run.
 - **2026-11-18 (S6 file 7, S6 closed)**
   - `tests/qt/test_plugin_failures.py`: the four fixture plugins (crash, hang, import failure, tampering) installed and enabled as a user would, each dropped on through the real app with real workers. After each: the fixed toast words, nothing beside the source or in the fallback folder, the tray normal (alert for the tampering), and the next conversion on a replaced worker for the crash and the hang, on the same one for the plugin error. `Application` gained `task_timeout_s` (and `pool_size` defaults to the pool's constant); `teardown_app` shared through `tests/conftest.py`.
   - A review found one blocking item, fixed: a 3 s timeout also governed a cold worker's first task (Pillow and the plugin import before it reads the task), so the tests use 10 s; the worker's pid now proves the respawn, and the fallback folder is checked. The full run then exposed a test-order leak the folder rule caught (in-process worker tests left fixture folders on the pytest process's `sys.path`, inherited by spawned workers): an autouse fixture restores `sys.path` after every test.
