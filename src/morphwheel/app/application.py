@@ -1,7 +1,7 @@
 """Qt application bootstrap (phase-4 §4.6, §9 S2 and S3): logging, the startup checks, the wiring.
 
 The composition root (R4): the only module that knows every layer. S2 assembled the dev wheel; S3
-adds the engine: the builtin manifest and the engine registry build the catalog, a ``WorkerPool``
+adds the engine: the plugin registry (S6) and the engine registry build the catalog, a pool
 of Qt-free processes runs the conversions, the ``JobDispatcher`` turns a ``DropRequest`` into
 tasks and a ``JobResult``, and the result becomes a toast and an undo record. S5 adds the tray,
 settings, the single-instance guard and the toast buttons.
@@ -32,7 +32,7 @@ import argparse
 import logging
 import sys
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
@@ -43,24 +43,29 @@ from PySide6.QtWidgets import QApplication
 
 from morphwheel import __version__, i18n
 from morphwheel.app.controller import Controller
-from morphwheel.core.catalog import Catalog
+from morphwheel.core.catalog import Catalog, Target
 from morphwheel.core.formats import FormatId
 from morphwheel.core.jobs import DropRequest, JobResult
 from morphwheel.engine import engines
 from morphwheel.engine.dispatcher import JobDispatcher
 from morphwheel.engine.undo import UndoRegistry
-from morphwheel.engine.worker_pool import WorkerPool, default_worker_executable
+from morphwheel.engine.worker_pool import (
+    DEFAULT_SIZE,
+    DEFAULT_TASK_TIMEOUT_S,
+    WorkerPool,
+    default_worker_executable,
+)
 from morphwheel.logs import setup_logging
 from morphwheel.platform import autostart, shell, system
 from morphwheel.platform.modifier_poller import ModifierPoller
 from morphwheel.platform.raw_input import RawInputMonitor
 from morphwheel.platform.single_instance import SingleInstance
-from morphwheel.plugins.loader import PluginSpec
-from morphwheel.plugins.manifest import Manifest, builtin_manifest
-from morphwheel.settings.model import Settings
+from morphwheel.plugins.discovery import discover
+from morphwheel.plugins.registry import Registry, build_registry
+from morphwheel.settings.model import PluginPrefs, Settings
 from morphwheel.settings.paths import AppPaths, app_paths
 from morphwheel.settings.store import SettingsStore
-from morphwheel.ui.dialogs import DetailsWindow, ElevatedChoice, HeicConsent
+from morphwheel.ui.dialogs import DetailsWindow, ElevatedChoice, HeicConsent, PluginTrustPrompt
 from morphwheel.ui.dialogs import ask_elevated as ask_elevated_dialog
 from morphwheel.ui.dialogs import explain_failed_restart as explain_failed_restart_dialog
 from morphwheel.ui.onboarding import ONBOARDING_DELAY_MS, ONBOARDING_KEY, onboarding_toast
@@ -139,9 +144,9 @@ class _JobView:
     count: int = 0
 
 
-def build_catalog(manifest: Manifest, missing: frozenset[FormatId]) -> Catalog:
-    """The wheel's targets: the builtin manifest (S6 adds user plugins) and the engine registry."""
-    return Catalog.of(manifest.targets, missing_engines=missing)
+def build_catalog(targets: Iterable[Target], missing: frozenset[FormatId]) -> Catalog:
+    """The wheel's targets (the plugin registry's, S6) and the engine registry's gaps (A6)."""
+    return Catalog.of(targets, missing_engines=missing)
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -191,7 +196,8 @@ class Application:
         restart: Callable[[], bool] = system.restart_unelevated,
         ask_elevated: Callable[[], ElevatedChoice] | None = None,
         explain_failed_restart: Callable[[], None] | None = None,
-        pool_size: int = 2,
+        pool_size: int = DEFAULT_SIZE,
+        task_timeout_s: float = DEFAULT_TASK_TIMEOUT_S,
         engine_fetch: engines.Fetch | None = None,
         instance: SingleInstance | None = None,
     ) -> None:
@@ -225,15 +231,19 @@ class Application:
         if enabled is not None and enabled != settings.start_with_windows:  # None: from source
             settings = self.settings_store.update(start_with_windows=enabled)
 
-        # The catalog: what the wheel offers (phase-3 §2.2) and which engine is missing (A6).
-        self.manifest = builtin_manifest()
+        # The plugins (S6): the folder is scanned here and on the user's ask, the settings
+        # say which are enabled and in which order; then the catalog: what the wheel offers
+        # (phase-3 §2.2) and which engine is missing (A6).
+        self._discovery = discover(self.paths.plugins_dir)
+        self.registry: Registry = build_registry(self._discovery, settings.plugins)
         self.missing_engines = engines.missing_engines(self.paths.engines_dir)
-        self.catalog = build_catalog(self.manifest, self.missing_engines)
+        self.catalog = build_catalog(self.registry.targets, self.missing_engines)
 
         # The engine: Qt-free workers, the dispatcher on top, undo and toasts around it.
         self.pool = WorkerPool(
             size=pool_size,
-            plugins=[PluginSpec(self.manifest.plugin.id, self.manifest.plugin.entry, None)],
+            task_timeout_s=task_timeout_s,
+            plugins=self.registry.specs,
             engines_dir=self.paths.engines_dir,
             log_level=level,
             executable=default_worker_executable(),
@@ -275,6 +285,8 @@ class Application:
         self.window.engine_missing.connect(self._offer_heic)
         self.consent = HeicConsent()
         self.consent.confirmed.connect(self._install_heic)
+        self.trust = PluginTrustPrompt()  # phase-3 §6.5: before a plugin is enabled
+        self.trust.confirmed.connect(self._enable_plugin)
         # The tray (phase-3 §6.1): built before the settings reach their owners below.
         self.tray = TrayIcon(motion_enabled=motion, light_taskbar=system.light_taskbar)
         self.tray.pause_toggled.connect(self._on_pause_toggled)
@@ -350,6 +362,7 @@ class Application:
         idempotent, so nothing is diffed here: the one place a new field has to be wired."""
         self.controller.set_trigger_key(settings.trigger_key)  # D8: at the next sample
         self.dispatcher.set_options(settings.converter_options())
+        self._set_plugin_prefs(settings.plugins)
         if settings.paused:
             self.controller.pause()
         else:
@@ -362,6 +375,70 @@ class Application:
         write = settings.start_with_windows or not at_start
         if write and not autostart.sync(settings.start_with_windows):
             log.warning("start with Windows: the Run value couldn't be changed; it stays")
+
+    # ----------------------------------------------------------------- plugins (S6)
+    def _set_plugin_prefs(self, prefs: PluginPrefs) -> None:
+        """A change of ``enabled`` or ``order`` rebuilds the registry from the last scan; the
+        same value is a no-op."""
+        if prefs != self.registry.prefs:
+            self._rebuild_plugins(build_registry(self._discovery, prefs))
+
+    def rescan_plugins(self) -> None:
+        """Read the plugins folder again, on the user's explicit ask (the Plugins page's
+        button): a plugin added, removed or replaced reaches the wheel and the workers without
+        a restart. Every call replaces the workers, so it is never called on a page show."""
+        self._discovery = discover(self.paths.plugins_dir)
+        registry = build_registry(self._discovery, self.registry.prefs)
+        self._rebuild_plugins(registry, replace_workers=True)
+
+    def _rebuild_plugins(self, registry: Registry, *, replace_workers: bool = False) -> None:
+        # The workers first, the catalog second: a drop on a new target can't reach a worker
+        # that doesn't know its plugin. A worker respawns before its next task.
+        self.registry = registry
+        self.pool.reconfigure(registry.specs, force=replace_workers)
+        self._refresh_catalog()
+        self._push_plugins()
+
+    def _push_plugins(self) -> None:
+        if self.settings_window is not None:
+            self.settings_window.set_plugins(self.registry, self._discovery.user_dir_error)
+        pending = self.trust.plugin_id
+        if pending is not None:
+            entry = self.registry.entry(pending)
+            if entry is None or entry.enabled:
+                self.trust.dismiss()  # gone, or enabled meanwhile: nothing left to ask
+
+    def _ask_enable_plugin(self, plugin_id: str) -> None:
+        """The trust prompt (phase-3 §6.5) before a plugin's code may run. Never mid-drag."""
+        if self.window.isVisible():
+            log.info("trust prompt not shown: a drag is in progress")
+            return
+        entry = self.registry.entry(plugin_id)
+        if entry is None or entry.enabled:
+            log.info("trust prompt not shown: %r is not a disabled plugin", plugin_id)
+            return
+        plugin = entry.manifest.plugin
+        self.trust.ask(plugin_id, plugin.name, plugin.version, entry.manifest.directory)
+
+    def _enable_plugin(self, plugin_id: str) -> None:
+        """The user said Enable: the id joins the trust record; the store tells everyone."""
+        entry = self.registry.entry(plugin_id)
+        if entry is None or entry.enabled:
+            log.info("plugin %r not enabled: gone or already enabled", plugin_id)
+            return
+        prefs = self.settings_store.settings.plugins
+        self.settings_store.update(plugins=replace(prefs, enabled=(*prefs.enabled, plugin_id)))
+        log.info("plugin enabled: %s", plugin_id)
+
+    def _open_plugins_folder(self) -> None:
+        """Morphwheel's own folder under the profile (§5): created on the way if need be."""
+        folder = self.paths.plugins_dir
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            log.warning("couldn't create the plugins folder %s: %s", folder, e.strerror or e)
+        if not shell.open_folder(folder):
+            log.warning("couldn't open the plugins folder %s", folder)
 
     # ----------------------------------------------------------------- the conversion flow
     def _on_drop(self, request: DropRequest) -> None:
@@ -422,6 +499,10 @@ class Application:
             self.settings_window.heic_install_requested.connect(self._ask_install_heic)
             self.settings_window.heic_remove_requested.connect(self._remove_heic)
             self.settings_window.set_heic_state(self._heic_state())
+            self.settings_window.plugin_enable_requested.connect(self._ask_enable_plugin)
+            self.settings_window.plugins_folder_requested.connect(self._open_plugins_folder)
+            self.settings_window.rescan_requested.connect(self.rescan_plugins)
+            self._push_plugins()
         if page is not None:
             self.settings_window.select_page(page)
         self.settings_window.open_and_raise()
@@ -511,14 +592,19 @@ class Application:
         self.toasts.show(heic_removed_toast(leftover=not gone), key=HEIC_TOAST_KEY)
 
     def _refresh_catalog(self) -> None:
-        """An engine came or went: the wheel plans with the new catalog from its next plan on.
-        The dispatcher reads only the targets, which don't change; the workers find an engine
-        that appeared after start-up by themselves."""
+        """An engine or a plugin came or went: the wheel plans with the new catalog from its
+        next plan on, the dispatcher resolves new drops against it (a job in flight keeps its
+        target), and the workers find an engine that appeared after start-up by themselves."""
         self.missing_engines = engines.missing_engines(self.paths.engines_dir)
-        self.catalog = build_catalog(self.manifest, self.missing_engines)
+        self.catalog = build_catalog(self.registry.targets, self.missing_engines)
         self.window.set_catalog(self.catalog)
+        self.dispatcher.set_catalog(self.catalog)
         self._push_heic_state()
-        log.info("catalog refreshed: missing engines %s", sorted(self.missing_engines) or "none")
+        log.info(
+            "catalog refreshed: %d plugin target(s) in the arc, missing engines %s",
+            len(self.registry.arc_targets),
+            sorted(self.missing_engines) or "none",
+        )
 
     def _push_heic_state(self) -> None:
         if self.settings_window is not None:

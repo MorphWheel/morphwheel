@@ -11,6 +11,15 @@ Rules:
 - **A refresh never fights an edit.** ``changed`` from elsewhere (the tray's Pause, a plugin
   toggle) refreshes every control except the one being edited: a slider that is held or still
   pending, a spin box that has the focus.
+- **The Plugins page (S6, RD-27) shows the registry the app pushes** (``set_plugins``), as the
+  HEIC row shows the engine state: the page never reads the plugins folder. A row's check box
+  is the switch: unchecking writes ``plugins.enabled`` at once; checking never writes, it asks
+  (``plugin_enable_requested``) and the app's trust prompt decides (§6.5). A drag, or Move up
+  and Move down, writes ``plugins.order`` whole. Both writes derive from the store's value and
+  the rows' ids, never from the check boxes. The push diffs the rows: the same ids keep their
+  items (so a drop's own write never rebuilds the list under Qt's drop handler), a new id
+  sequence rebuilds. Broken folders sit in a second, non-draggable list with a translated
+  headline over the raw reason (RD-25).
 - **A failed save is said once and cleared by the next success.** ``save_failed`` is kept until
   the ``changed`` that follows it draws the bar; a later successful save (the whole value is
   written each time) draws the load problems instead, or nothing.
@@ -32,10 +41,11 @@ import logging
 from dataclasses import replace
 from typing import Literal
 
-from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Signal
-from PySide6.QtGui import QHideEvent, QKeyEvent, QShowEvent
+from PySide6.QtCore import QCoreApplication, QModelIndex, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtGui import QHideEvent, QKeyEvent, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -44,6 +54,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QPushButton,
     QRadioButton,
     QSlider,
@@ -53,7 +64,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from morphwheel.i18n import translate
+from morphwheel.core.catalog import MORE_ARC_MAX
+from morphwheel.core.formats import FormatId
+from morphwheel.i18n import QT_TRANSLATE_NOOP, translate
+from morphwheel.plugins.discovery import BrokenKind, BrokenPlugin
+from morphwheel.plugins.registry import PluginEntry, Registry
 from morphwheel.settings.model import (
     LONGEST_SIDE_RANGE,
     QUALITY_RANGE,
@@ -69,7 +84,10 @@ from morphwheel.ui.text import trigger_key_label
 log = logging.getLogger("morphwheel.ui.settings")
 
 COMMIT_DELAY_MS = 300  # a slider's debounce: key repeat and the wheel become one save
-PAGES = ("general", "conversion", "about")
+PAGES = ("general", "conversion", "plugins", "about")
+PLUGIN_ID_ROLE = Qt.ItemDataRole.UserRole
+MAX_INPUTS_SHOWN = 3  # a row says "JPG, PNG, WebP… → TIFF", not the whole list
+BROKEN_LIST_HEIGHT = 120  # a few two-line rows; the rest scroll
 MIN_WIDTH = 640
 MIN_HEIGHT = 420
 
@@ -140,6 +158,9 @@ HeicState = Literal["missing", "installing", "installed"]
 class SettingsWindow(QWidget):
     heic_install_requested = Signal()  # the app asks for consent, then downloads (A6)
     heic_remove_requested = Signal()
+    plugin_enable_requested = Signal(str)  # the plugin id; the app shows the trust prompt (§6.5)
+    plugins_folder_requested = Signal()
+    rescan_requested = Signal()
 
     def __init__(
         self,
@@ -162,6 +183,7 @@ class SettingsWindow(QWidget):
         pages = (  # one table: the sidebar, the stack and ``PAGES`` stay in step
             ("general", translate("Settings", "General"), self._build_general()),
             ("conversion", translate("Settings", "Conversion"), self._build_conversion()),
+            ("plugins", translate("Settings", "Plugins"), self._build_plugins()),
             ("about", translate("Settings", "About"), self._build_about(version, repository_url)),
         )
         assert tuple(name for name, _, _ in pages) == PAGES
@@ -274,6 +296,84 @@ class SettingsWindow(QWidget):
         self.set_heic_state("missing")
         return page
 
+    def _build_plugins(self) -> QWidget:
+        page = QWidget()
+        column = QVBoxLayout(page)
+        self.plugin_list = QListWidget()  # one row per third-party plugin, in arc order
+        self.plugin_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.plugin_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.plugin_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.plugin_list.itemChanged.connect(self._on_plugin_item_changed)
+        self.plugin_list.currentRowChanged.connect(self._update_move_buttons)
+        self.plugin_list.model().rowsMoved.connect(self._on_plugin_rows_moved)
+        column.addWidget(self.plugin_list, 1)
+        self.plugins_empty = QLabel(
+            translate(
+                "Settings",
+                "No plugins installed. Copy a plugin folder into the plugins folder, then click "
+                "Rescan.",
+            )
+        )
+        self.plugins_empty.setWordWrap(True)
+        column.addWidget(self.plugins_empty)
+        order_row = QHBoxLayout()
+        self.move_up = QPushButton(translate("Settings", "Move up"))
+        self.move_up.setAutoDefault(False)
+        self.move_up.setShortcut(QKeySequence("Alt+Up"))
+        self.move_up.clicked.connect(self._on_move_up)
+        self.move_down = QPushButton(translate("Settings", "Move down"))
+        self.move_down.setAutoDefault(False)
+        self.move_down.setShortcut(QKeySequence("Alt+Down"))
+        self.move_down.clicked.connect(self._on_move_down)
+        self.arc_note = QLabel()
+        self.arc_note.setWordWrap(True)
+        order_row.addWidget(self.move_up, 0)
+        order_row.addWidget(self.move_down, 0)
+        order_row.addWidget(self.arc_note, 1)
+        column.addLayout(order_row)
+        hint = QLabel(
+            translate(
+                "Settings",
+                "The order of the rows is the order of the More arc: drag a row, or use Move up "
+                "and Move down. A check box enables a plugin.",
+            )
+        )
+        hint.setWordWrap(True)
+        column.addWidget(hint)
+        self.broken_label = QLabel(translate("Settings", "Folders that aren't usable plugins:"))
+        self.broken_list = QListWidget()  # selectable, so a reason can be read and copied
+        self.broken_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.broken_list.setWordWrap(True)
+        self.broken_list.setMaximumHeight(BROKEN_LIST_HEIGHT)  # the plugin rows keep the room
+        column.addWidget(self.broken_label)
+        column.addWidget(self.broken_list)
+        self.folder_error = QLabel()  # the plugins folder itself can't be used
+        self.folder_error.setWordWrap(True)
+        self.folder_error.setTextFormat(Qt.TextFormat.PlainText)
+        column.addWidget(self.folder_error)
+        buttons = QHBoxLayout()
+        self.open_plugins_folder = QPushButton(translate("Settings", "Open plugins folder"))
+        self.open_plugins_folder.setAutoDefault(False)
+        self.open_plugins_folder.clicked.connect(self.plugins_folder_requested)
+        self.rescan = QPushButton(translate("Settings", "Rescan"))
+        self.rescan.setAutoDefault(False)
+        self.rescan.clicked.connect(self.rescan_requested)
+        buttons.addWidget(self.open_plugins_folder, 0)
+        buttons.addWidget(self.rescan, 0)
+        buttons.addStretch(1)
+        column.addLayout(buttons)
+        warning = QLabel(
+            translate(
+                "Settings",
+                "Plugins are Python code that runs with your permissions. Only enable plugins "
+                "you trust.",
+            )
+        )
+        warning.setWordWrap(True)
+        column.addWidget(warning)
+        self._show_plugin_rows((), (), None)
+        return page
+
     def _build_about(self, version: str, repository_url: str) -> QWidget:
         page = QWidget()
         column = QVBoxLayout(page)
@@ -342,6 +442,120 @@ class SettingsWindow(QWidget):
     @property
     def heic_state(self) -> HeicState:
         return self._heic_state
+
+    # ----------------------------------------------------------------- the plugins (S6)
+    def set_plugins(self, registry: Registry, folder_error: str | None = None) -> None:
+        """What the rows show: the app pushes the registry at build and after every rebuild."""
+        self._show_plugin_rows(registry.third_party, registry.broken, folder_error)
+        overflow = registry.more_overflow
+        if overflow:
+            note = translate(
+                "Settings", "%n enabled target(s) left out of the More arc.", None, overflow
+            )
+        else:
+            note = translate("Settings", "The More arc shows up to %1 targets.").replace(
+                "%1", str(MORE_ARC_MAX)
+            )
+        self.arc_note.setText(note)
+
+    def plugin_rows(self) -> tuple[tuple[str, bool], ...]:
+        """``(id, checked)`` per row, top to bottom (for the app's tests and the page itself)."""
+        return tuple(
+            (
+                str(self.plugin_list.item(i).data(PLUGIN_ID_ROLE)),
+                self.plugin_list.item(i).checkState() == Qt.CheckState.Checked,
+            )
+            for i in range(self.plugin_list.count())
+        )
+
+    def _show_plugin_rows(
+        self,
+        entries: tuple[PluginEntry, ...],
+        broken: tuple[BrokenPlugin, ...],
+        folder_error: str | None,
+    ) -> None:
+        ids = [e.id for e in entries]
+        shown = [plugin_id for plugin_id, _ in self.plugin_rows()]
+        with QSignalBlocker(self.plugin_list):  # a refresh never writes
+            if ids != shown:  # a new sequence: rebuild, keeping the current row by id
+                current = self.plugin_list.currentItem()
+                current_id = current.data(PLUGIN_ID_ROLE) if current is not None else None
+                self.plugin_list.clear()
+                for entry in entries:
+                    item = QListWidgetItem()
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    item.setData(PLUGIN_ID_ROLE, entry.id)
+                    self.plugin_list.addItem(item)
+                    if entry.id == current_id:
+                        self.plugin_list.setCurrentItem(item)
+            for row, entry in enumerate(entries):  # the same items: texts and checks only
+                item = self.plugin_list.item(row)
+                item.setText(_plugin_row_text(entry))
+                item.setCheckState(
+                    Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked
+                )
+        self.plugin_list.setVisible(bool(entries))
+        self.plugins_empty.setVisible(not entries)
+        self.broken_list.clear()
+        for b in broken:
+            self.broken_list.addItem(
+                f"⚠ {b.directory.name}: {_broken_headline(b.kind)}\n{b.reason}"
+            )
+        self.broken_label.setVisible(bool(broken))
+        self.broken_list.setVisible(bool(broken))
+        if folder_error:
+            text = translate("Settings", "The plugins folder can't be used: %1")
+            self.folder_error.setText("⚠ " + text.replace("%1", folder_error))
+        self.folder_error.setVisible(bool(folder_error))
+        self._update_move_buttons()
+
+    def _on_plugin_item_changed(self, item: QListWidgetItem) -> None:
+        plugin_id = item.data(PLUGIN_ID_ROLE)
+        if not isinstance(plugin_id, str):
+            return  # a row still being built by a drop
+        prefs = self._store.settings.plugins  # the truth the rows were drawn from
+        checked = item.checkState() == Qt.CheckState.Checked
+        if checked == (plugin_id in prefs.enabled):
+            return  # a text or data change, or a drop's copy: not a switch
+        if checked:
+            with QSignalBlocker(self.plugin_list):
+                item.setCheckState(Qt.CheckState.Unchecked)  # the trust prompt decides (§6.5)
+            self.plugin_enable_requested.emit(plugin_id)
+            return
+        enabled = tuple(i for i in prefs.enabled if i != plugin_id)
+        self._store.update(plugins=replace(prefs, enabled=enabled))
+
+    def _on_plugin_rows_moved(self) -> None:
+        # After the drop has fully landed (Qt's handler is still on the stack here).
+        QTimer.singleShot(0, self._commit_plugin_order)
+
+    def _commit_plugin_order(self) -> None:
+        order = tuple(plugin_id for plugin_id, _ in self.plugin_rows())
+        prefs = self._store.settings.plugins
+        if order != prefs.order:
+            self._store.update(plugins=replace(prefs, order=order))
+
+    def _on_move_up(self) -> None:
+        self._move_current_row(-1)
+
+    def _on_move_down(self) -> None:
+        self._move_current_row(+1)
+
+    def _move_current_row(self, delta: int) -> None:
+        row = self.plugin_list.currentRow()
+        target = row + delta
+        if row < 0 or not 0 <= target < self.plugin_list.count():
+            return
+        # moveRow's destination counts rows before the move: one past the target going down.
+        destination = target if delta < 0 else target + 1
+        self.plugin_list.model().moveRow(QModelIndex(), row, QModelIndex(), destination)
+        self.plugin_list.setCurrentRow(target)  # Space and the arrows keep working
+        self._update_move_buttons()  # the current index moved with the item: no signal
+
+    def _update_move_buttons(self) -> None:
+        row = self.plugin_list.currentRow()
+        self.move_up.setEnabled(row > 0)
+        self.move_down.setEnabled(0 <= row < self.plugin_list.count() - 1)
 
     def _on_heic_button(self) -> None:
         if self._heic_state == "installed":
@@ -435,3 +649,39 @@ class SettingsWindow(QWidget):
     def _on_longest_side(self) -> None:
         compress = replace(self._store.settings.compress, longest_side=self.longest_side.value())
         self._store.update(compress=compress)
+
+
+# --------------------------------------------------------------------------- plugin rows
+def _plugin_row_text(entry: PluginEntry) -> str:
+    """``Name 1.2  ·  JPG, PNG → TIFF``: the labels the wheel uses, the inputs capped."""
+    targets = entry.manifest.targets
+    accepted = {f for t in targets for f in t.accepts}
+    inputs = [f.label for f in FormatId if f in accepted]
+    if len(inputs) > MAX_INPUTS_SHOWN:
+        inputs = [*inputs[:MAX_INPUTS_SHOWN], "…"]
+    outputs = ", ".join(t.label for t in targets)
+    plugin = entry.manifest.plugin
+    return f"{plugin.name} {plugin.version}  ·  {', '.join(inputs)} → {outputs}"
+
+
+_BROKEN_HEADLINES: dict[BrokenKind, str] = {  # one per kind: a test holds it complete
+    BrokenKind.LINK: QT_TRANSLATE_NOOP("Settings", "Links aren't followed; copy the folder here"),
+    BrokenKind.NO_MANIFEST: QT_TRANSLATE_NOOP("Settings", "No plugin.toml"),
+    BrokenKind.MISPLACED: QT_TRANSLATE_NOOP(
+        "Settings", "plugin.toml must be inside a plugin folder"
+    ),
+    BrokenKind.INVALID: QT_TRANSLATE_NOOP("Settings", "The manifest is invalid"),
+    BrokenKind.NAME_MISMATCH: QT_TRANSLATE_NOOP(
+        "Settings", "The folder name doesn't match the plugin id"
+    ),
+    BrokenKind.ID_TAKEN: QT_TRANSLATE_NOOP("Settings", "Another plugin has this id"),
+    BrokenKind.MODULE_CLASH: QT_TRANSLATE_NOOP(
+        "Settings", "The plugin's module name is used by another plugin"
+    ),
+    BrokenKind.ERROR: QT_TRANSLATE_NOOP("Settings", "Can't read this plugin"),
+}
+
+
+def _broken_headline(kind: BrokenKind) -> str:
+    """The translated line over a broken folder's raw reason (RD-25)."""
+    return QCoreApplication.translate("Settings", _BROKEN_HEADLINES[kind])

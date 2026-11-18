@@ -11,9 +11,9 @@ Contract for a converter:
   Morphwheel chose. Morphwheel renames it to its final name afterwards; the converter never picks
   names, never writes elsewhere, and never touches the input (the source is fingerprinted before
   and after, and a change is reported as a critical error).
-- Raise :class:`ConversionError` (or a subclass) for an expected failure. The message is shown to
-  the user, so keep it short and free of paths. Any other exception is reported as a plugin error
-  with its traceback in the log.
+- Raise :class:`ConversionError` (or a subclass) for an expected failure. The toast shows a fixed
+  sentence per error; the message goes to the log, so keep it free of paths. Any other exception
+  is reported as a plugin error with its traceback in the log.
 - ``ctx.progress(fraction)`` is optional and cheap; call it for long conversions.
 - Converters run in worker processes without Qt. They must be importable without side effects.
 
@@ -65,7 +65,7 @@ class Converter(Protocol):
 
 
 class ConversionError(Exception):
-    """An expected failure. The message is shown in the toast."""
+    """An expected failure. The toast says so in a fixed sentence; the message goes to the log."""
 
 
 class UnreadableInputError(ConversionError):

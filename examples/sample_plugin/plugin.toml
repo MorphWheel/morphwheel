@@ -1,0 +1,20 @@
+# The sample plugin: a converter to BMP in about thirty lines of Python.
+#
+# To try it, copy this whole folder to %APPDATA%\Morphwheel\plugins\sample_plugin\ (the folder
+# must be named after the id below), open Settings → Plugins, click Rescan, tick the row and
+# confirm the prompt. Morphwheel reads this file only; sample_plugin.py runs in a worker process
+# once you enable it.
+
+[plugin]
+id = "sample_plugin"                  # starts with a letter or digit; lowercase letters, digits, '.', '_', '-'; at most 64
+name = "Sample plugin"                # shown on the Plugins page
+version = "0.1.0"
+api = "0.1"                           # the plugin API this converter was written against
+entry = "sample_plugin:Converter"     # module:Class, or package.module:Class; one module or package per plugin
+
+[[targets]]
+id = "bmp"                            # shown to the app as "sample_plugin:bmp"
+label = "BMP"                         # the text on the wheel, at most 16 characters
+output = "bmp"                        # the output format: jpeg, png, webp, avif, heic, bmp, tiff, gif, ico, pdf
+accepts = ["png", "jpeg", "webp", "gif", "tiff"]   # the inputs it takes, same vocabulary
+# slot = "n"                          # ignored for third-party plugins: they live in the More arc

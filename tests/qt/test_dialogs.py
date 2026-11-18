@@ -3,14 +3,22 @@ and the one bring-back helper."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox
 from pytestqt.qtbot import QtBot
 
-from morphwheel.ui.dialogs import DetailsWindow, HeicConsent, bring_to_front, elevated_box
+from morphwheel.ui.dialogs import (
+    DetailsWindow,
+    HeicConsent,
+    PluginTrustPrompt,
+    bring_to_front,
+    elevated_box,
+)
 
 pytestmark = pytest.mark.usefixtures("qapp")
 
@@ -97,3 +105,61 @@ def test_bring_to_front_shows_or_restores(qtbot: QtBot) -> None:
     assert window.isVisible()
     assert not window.isMinimized()
     window.hide()
+
+
+def test_the_trust_prompt_names_the_plugin_and_defaults_to_cancel(qtbot: QtBot) -> None:
+    """Phase-3 §6.5: the plugin, its folder, the warning; Cancel is the keyboard default."""
+    prompt = PluginTrustPrompt()
+    confirmed: list[str] = []
+    prompt.confirmed.connect(confirmed.append)
+    assert not prompt.is_open
+    assert prompt.plugin_id is None
+    folder = Path("C:/Users/someone/AppData/Roaming/Morphwheel/plugins/heic_pro")
+    prompt.ask("heic_pro", "HEIC Pro", "1.2", folder)
+    assert prompt.is_open
+    assert prompt.plugin_id == "heic_pro"
+    box = prompt.box
+    assert box is not None
+    qtbot.addWidget(box)
+    assert box.text() == "Enable plugin?"
+    info = box.informativeText()
+    assert info.startswith("HEIC Pro 1.2\n")
+    assert str(folder) in info
+    assert "Python code with your user permissions" in info
+    assert box.windowModality() == Qt.WindowModality.NonModal
+    by_text = {b.text(): b for b in box.buttons()}
+    assert set(by_text) == {"Cancel", "Enable"}
+    assert box.defaultButton() is by_text["Cancel"]  # Return never enables a plugin unread
+    assert box.escapeButton() is by_text["Cancel"]
+    by_text["Cancel"].click()
+    assert confirmed == []
+    assert not prompt.is_open
+    assert prompt.plugin_id is None
+
+    prompt.ask("heic_pro", "HEIC Pro", "1.2", folder)
+    prompt.ask("other", "Other", "0.1", folder.with_name("other"))  # replaces the first
+    assert prompt.plugin_id == "other"
+    assert "Other 0.1" in box.informativeText()
+    by_text["Enable"].click()
+    assert confirmed == ["other"]  # the plugin the prompt was about when answered
+    assert prompt.plugin_id is None
+
+    prompt.ask("heic_pro", "HEIC Pro", "1.2", folder)
+    prompt.dismiss()  # a rescan removed it: the question is moot
+    assert not prompt.is_open
+    assert prompt.plugin_id is None
+
+
+def test_the_trust_prompt_shows_a_manifest_name_as_plain_text(qtbot: QtBot) -> None:
+    """A third-party name is untrusted: markup in it must not render or link."""
+    prompt = PluginTrustPrompt()
+    prompt.ask("evil", '<a href="https://example.invalid">Evil</a>', "1", Path("C:/p/evil"))
+    box = prompt.box
+    assert box is not None
+    qtbot.addWidget(box)
+    assert box.textFormat() == Qt.TextFormat.PlainText
+    label = box.findChild(QLabel, "qt_msgbox_informativelabel")
+    assert label is not None
+    assert label.textFormat() == Qt.TextFormat.PlainText
+    assert '<a href="https://example.invalid">Evil</a> 1' in label.text()
+    prompt.dismiss()

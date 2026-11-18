@@ -77,6 +77,11 @@ class JobDispatcher(QObject):
     def options(self) -> Mapping[str, object]:
         return self._options
 
+    def set_catalog(self, catalog: Catalog) -> None:
+        """The targets for the requests submitted from now on (a plugin came or went, S6).
+        A job in flight holds its own ``Target``."""
+        self._catalog = catalog
+
     def set_options(self, options: Mapping[str, object]) -> None:
         """Quality and compress presets for the tasks submitted from now on (S5 settings)."""
         self._options = dict(options)

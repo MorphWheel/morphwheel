@@ -10,6 +10,7 @@ from __future__ import annotations
 import getpass
 import os
 import subprocess
+import sys
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -39,6 +40,16 @@ class Clock:
 @pytest.fixture
 def clock() -> Clock:
     return Clock()
+
+
+@pytest.fixture(autouse=True)
+def _own_sys_path() -> Iterator[None]:
+    """Every test gets ``sys.path`` back as it found it. The loader appends plugin folders to it,
+    and a worker spawned later inherits the process's path: a fixture folder left behind would
+    make a plugin installed under the same module name resolve elsewhere (RD-28 refuses it)."""
+    saved = list(sys.path)
+    yield
+    sys.path[:] = saved
 
 
 @pytest.fixture
@@ -257,3 +268,14 @@ def read_only_dir(tmp_path: Path, lock_directory: Callable[[Path], None]) -> Pat
     d.mkdir()
     lock_directory(d)
     return d
+
+
+def teardown_app(app: object) -> None:
+    """Stop an ``Application`` built by a test and drop its log handlers, whatever the test did."""
+    import logging
+
+    app.stop()  # type: ignore[attr-defined]
+    logger = logging.getLogger("morphwheel")
+    for handler in [h for h in logger.handlers if getattr(h, "_morphwheel_handler", False)]:
+        logger.removeHandler(handler)
+        handler.close()

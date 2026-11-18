@@ -155,3 +155,24 @@ def test_sniff_bmp_by_its_dib_header(dib_header_size: int) -> None:
     """The DIB header sizes Pillow's BMP reader accepts: OS/2 v1 up to BITMAPV5HEADER."""
     header = b"BM" + struct.pack("<IHHII", 1000, 0, 0, 14 + dib_header_size, dib_header_size)
     assert sniff(header + b"\x00" * 64) == Sniff(FormatId.BMP, False)
+
+
+def test_every_format_has_the_label_the_wheel_shows_and_the_builtin_manifest_agrees() -> None:
+    from morphwheel.plugins.manifest import builtin_manifest
+
+    assert FormatId.JPEG.label == "JPG"
+    assert [f.label for f in FormatId] == [
+        "JPG",
+        "PNG",
+        "WebP",
+        "AVIF",
+        "HEIC",
+        "BMP",
+        "TIFF",
+        "GIF",
+        "ICO",
+        "PDF",
+    ]
+    for target in builtin_manifest().targets:
+        if target.output_format is not None:
+            assert target.label == target.output_format.label, target.id

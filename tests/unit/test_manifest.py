@@ -14,6 +14,7 @@ import pytest
 from morphwheel.core.catalog import MORE_SLOT, SLOT_ORDER, Catalog, SlotPos, TargetKind
 from morphwheel.core.formats import FileInfo, FormatId
 from morphwheel.plugins.manifest import (
+    MAX_MANIFEST_BYTES,
     Manifest,
     ManifestError,
     api_compatible,
@@ -172,3 +173,33 @@ def test_bundled_manifest_matches_the_slot_map() -> None:
     assert {p: (s.status, s.target and s.target.id) for p, s in plan.slots.items()} == {
         p: (s.status, s.target and s.target.id) for p, s in expected.slots.items()
     }
+
+
+def test_a_bom_is_tolerated_and_a_binary_file_is_a_manifest_error(tmp_path: Path) -> None:
+    """PowerShell's Out-File writes a BOM; a binary file must not escape as UnicodeDecodeError."""
+    path = tmp_path / "plugin.toml"
+    path.write_bytes(b"\xef\xbb\xbf" + GOOD.encode("utf-8"))
+    assert load_manifest(path, is_builtin=False).plugin.id == "com.example.heicpro"
+    path.write_bytes(b"\xff\xfe\x00\x01")
+    with pytest.raises(ManifestError, match="not UTF-8 text"):
+        load_manifest(path, is_builtin=False)
+
+
+def test_a_manifest_is_read_up_to_the_cap_whatever_its_size_says(tmp_path: Path) -> None:
+    path = tmp_path / "plugin.toml"
+    path.write_text(GOOD + "#" * MAX_MANIFEST_BYTES, encoding="utf-8")
+    with pytest.raises(ManifestError, match="larger than 64 KiB"):
+        load_manifest(path, is_builtin=False)
+    path.write_bytes((GOOD + "#" * (MAX_MANIFEST_BYTES - len(GOOD.encode()))).encode())
+    assert load_manifest(path, is_builtin=False).plugin.id == "com.example.heicpro"
+
+
+@pytest.mark.parametrize(
+    "entry", ["json:Converter", "morphwheel.x:C", "PIL.Image:Image", "os.path:join"]
+)
+def test_a_third_party_entry_named_like_the_app_or_python_is_refused(entry: str) -> None:
+    """RD-28: a worker's import of such a name would never find the plugin's own file."""
+    text = GOOD.replace('entry = "heic_pro:Converter"', f'entry = "{entry}"')
+    with pytest.raises(ManifestError, match=r"plugin[.]entry: the module name"):
+        parse(text)
+    parse(text, builtin=True)  # the bundled plugin is a morphwheel module: allowed

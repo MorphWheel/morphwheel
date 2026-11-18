@@ -7,6 +7,12 @@ delayed by a hung worker.
 
 Rules:
 
+- **A plugin list change respawns.** ``reconfigure()`` (a plugin enabled, disabled or replaced,
+  S6) bumps a version; a supervisor whose worker is behind stops it and spawns a fresh one
+  before handing over its next task, so no stale plugin module, ``sys.path`` entry or cached
+  converter survives in a worker, and a task never reaches a worker that doesn't know its
+  plugin. One spawn per worker per change; a task in flight finishes first, and the first
+  task after a change waits for the fresh worker's start (a cold start, not a warm one).
 - **Spawn, warmed at start.** ``start()`` spawns every worker and sends ``Configure``; the first
   task finds a warm process. The frozen app points ``multiprocessing`` at the Qt-free
   ``morphwheel-worker.exe`` (A5a) through ``executable``.
@@ -33,7 +39,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +111,8 @@ class WorkerPool:
         self._size = size
         self._timeout = task_timeout_s
         self._configure = Configure(tuple(plugins), engines_dir, log_level)
+        self._configure_lock = threading.Lock()
+        self._configure_version = 0  # bumped by reconfigure(); workers carry the one they got
         self._executable = executable
         self._on_progress = on_progress
         self._on_log = on_log or _forward_to_gui_logger
@@ -137,6 +145,21 @@ class WorkerPool:
             )
             thread.start()
             self._threads.append(thread)
+
+    def reconfigure(self, plugins: Sequence[PluginSpec], *, force: bool = False) -> None:
+        """The plugin list for every task from now on (S6). Each worker is replaced by a fresh
+        one before its next task; a task in flight finishes on the old list. The same set
+        again changes nothing, unless ``force`` (a plugin's folder was replaced)."""
+        with self._configure_lock:
+            if not force and set(plugins) == set(self._configure.plugins):
+                return
+            self._configure = replace(self._configure, plugins=tuple(plugins))
+            self._configure_version += 1
+        log.info("workers reconfigured: %s", [s.plugin_id for s in plugins])
+
+    def _snapshot(self) -> tuple[Configure, int]:
+        with self._configure_lock:
+            return self._configure, self._configure_version
 
     def run(self, task: Task, done: Done) -> None:
         """Queue a task. ``done`` is called exactly once: from a pool thread, or right here when
@@ -190,17 +213,32 @@ class WorkerPool:
                 if self._stopping.is_set():
                     log.info("shutting down: %s not converted", task.source.name)
                     continue  # the GUI is going away; its callbacks must not run now
+                if worker.version != self._snapshot()[1]:  # the plugin list changed (S6)
+                    worker.stop()  # this task waits for the fresh worker's start
+                    worker = self._spawn(index)
+                    if worker is None:
+                        detail = "the worker process can't start"
+                        log.error("%s not converted: %s", task.source.name, detail)
+                        self._finish(
+                            task, done, TaskResult.failure(task, ErrorCode.WORKER_CRASHED, detail)
+                        )
+                        continue
                 result, alive = self._run_one(worker, task)
-                try:
-                    done(result)
-                except Exception:
-                    log.exception("the done callback raised for %s", task.source.name)
+                self._finish(task, done, result)
                 if not alive:
                     worker.kill()
                     worker = None
         finally:
             if worker is not None:
                 worker.stop()
+
+    @staticmethod
+    def _finish(task: Task, done: Done, result: TaskResult) -> None:
+        """The one call of ``done`` per task: a raising callback is logged, never fatal."""
+        try:
+            done(result)
+        except Exception:
+            log.exception("the done callback raised for %s", task.source.name)
 
     def _fail_queued(self, detail: str) -> None:
         """Report every queued task as crashed, so jobs finish while workers can't start."""
@@ -214,10 +252,7 @@ class WorkerPool:
                 return
             task, done = item
             log.error("%s not converted: %s", task.source.name, detail)
-            try:
-                done(TaskResult.failure(task, ErrorCode.WORKER_CRASHED, detail))
-            except Exception:
-                log.exception("the done callback raised for %s", task.source.name)
+            self._finish(task, done, TaskResult.failure(task, ErrorCode.WORKER_CRASHED, detail))
 
     def _spawn(self, index: int) -> _Worker | None:
         parent, child = self._ctx.Pipe(duplex=True)
@@ -232,7 +267,8 @@ class WorkerPool:
             child.close()
             return None
         child.close()  # only the worker holds this end: its death reads as EOF
-        worker = _Worker(index, process, parent)
+        configure, version = self._snapshot()  # one pair: never an old list with a new stamp
+        worker = _Worker(index, process, parent, version)
         ready = worker.wait_message(READY_TIMEOUT_S)
         if not isinstance(ready, Ready):
             log.error("worker %d: no Ready within %.0f s (%r)", index, READY_TIMEOUT_S, ready)
@@ -245,7 +281,7 @@ class WorkerPool:
             self._ready[index] = info
         self._ready_event.set()
         try:
-            worker.conn.send(self._configure)
+            worker.conn.send(configure)
         except (OSError, ValueError):
             worker.kill()
             return None
@@ -298,10 +334,11 @@ _DEAD = object()
 
 
 class _Worker:
-    def __init__(self, index: int, process: Any, conn: Any) -> None:
+    def __init__(self, index: int, process: Any, conn: Any, version: int = 0) -> None:
         self.index = index
         self.process = process
         self.conn = conn
+        self.version = version  # the configure version this worker was given
 
     def wait_message(self, timeout_s: float) -> object:
         """The next message, ``_TIMEOUT``, or ``_DEAD`` (EOF or the process sentinel fired)."""

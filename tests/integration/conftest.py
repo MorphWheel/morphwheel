@@ -9,12 +9,17 @@ skip otherwise.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import shutil
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 from PIL import Image, ImageDraw
+
+from morphwheel.core.jobs import TaskResult
+from morphwheel.engine.worker_main import Progress
 
 HAS_HEIF = importlib.util.find_spec("pillow_heif") is not None
 FIXTURE_PLUGINS = Path(__file__).resolve().parents[1] / "fixtures" / "plugins"
@@ -101,3 +106,27 @@ def images(fixture_images: Mapping[str, Path], tmp_path: Path) -> Mapping[str, P
 
 def plugin_dir(name: str) -> Path:
     return FIXTURE_PLUGINS / name
+
+
+class Collector:
+    """Collects a pool's results, progress and log records; ``wait`` blocks for ``expect``."""
+
+    def __init__(self) -> None:
+        self.results: list[TaskResult] = []
+        self.progress: list[Progress] = []
+        self.records: list[logging.LogRecord] = []
+        self._event = threading.Event()
+        self._expected = 0
+
+    def expect(self, n: int) -> None:
+        self._expected = n
+        self._event.clear()
+
+    def done(self, result: TaskResult) -> None:
+        self.results.append(result)
+        if len(self.results) >= self._expected:
+            self._event.set()
+
+    def wait(self, timeout_s: float = 60.0) -> list[TaskResult]:
+        assert self._event.wait(timeout_s), f"got {len(self.results)} of {self._expected} results"
+        return self.results

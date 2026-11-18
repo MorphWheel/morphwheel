@@ -7,7 +7,7 @@ Undo knows the new file.
 
 from __future__ import annotations
 
-import logging
+import shutil
 import sys
 import threading
 from collections.abc import Callable, Iterator
@@ -31,7 +31,7 @@ from morphwheel.app.application import (
     motion_switch,
     parse_args,
 )
-from morphwheel.core.catalog import MORE_SLOT, SLOT_ORDER
+from morphwheel.core.catalog import MORE_SLOT, SLOT_ORDER, Reason
 from morphwheel.core.errors import ErrorCode
 from morphwheel.core.formats import FileInfo, FormatId, Sniff
 from morphwheel.core.jobs import DropRequest, JobOutcome, JobResult, TaskResult, TaskStatus
@@ -40,7 +40,7 @@ from morphwheel.i18n import translate
 from morphwheel.platform import autostart, system
 from morphwheel.platform.single_instance import SingleInstance
 from morphwheel.plugins.manifest import builtin_manifest
-from morphwheel.settings.model import Quality, Settings
+from morphwheel.settings.model import PluginPrefs, Quality, Settings
 from morphwheel.settings.paths import AppPaths
 from morphwheel.settings.store import load_settings, save_settings
 from morphwheel.ui.onboarding import ONBOARDING_KEY
@@ -50,6 +50,7 @@ from morphwheel.ui.toasts.widget import ToastWidget
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "unit"))
 from fake_heic import fake_wheel, pin
 
+from conftest import teardown_app
 from morphwheel.ui.tray import TrayState
 
 pytestmark = pytest.mark.usefixtures("qapp")
@@ -70,7 +71,7 @@ def test_parse_args_and_version() -> None:
 
 
 def test_catalog_comes_from_the_manifest_and_the_engine_registry() -> None:
-    catalog = build_catalog(builtin_manifest(), frozenset({FormatId.HEIC}))
+    catalog = build_catalog(builtin_manifest().targets, frozenset({FormatId.HEIC}))
     plan = catalog.plan([FileInfo.from_path(Path("photo.png"))])
     assert plan.ok
     labels = {pos: s.target.label if s.target else None for pos, s in plan.slots.items()}
@@ -80,16 +81,8 @@ def test_catalog_comes_from_the_manifest_and_the_engine_registry() -> None:
     assert plan.slots[SLOT_ORDER[1]].reason is not None  # PNG onto PNG: the source
     heic = catalog.plan([FileInfo.from_path(Path("photo.heic"))])
     assert not heic.ok  # the engine is an opt-in download (A6)
-    with_engine = build_catalog(builtin_manifest(), frozenset())
+    with_engine = build_catalog(builtin_manifest().targets, frozenset())
     assert with_engine.plan([FileInfo.from_path(Path("photo.heic"))]).ok
-
-
-def _teardown(app: Application) -> None:
-    app.stop()
-    logger = logging.getLogger("morphwheel")
-    for handler in [h for h in logger.handlers if getattr(h, "_morphwheel_handler", False)]:
-        logger.removeHandler(handler)
-        handler.close()
 
 
 MakeApp = Callable[..., Application]
@@ -115,7 +108,7 @@ def make_app(app_paths_tmp: AppPaths) -> Iterator[MakeApp]:
         yield make
     finally:
         for application in built:
-            _teardown(application)
+            teardown_app(application)
 
 
 @pytest.fixture
@@ -221,7 +214,7 @@ def test_settings_reach_their_owners_at_start_and_on_change(app_paths_tmp: AppPa
         assert application.window.wheel_size == "S"
         assert load_settings(app_paths_tmp.settings_file).settings.wheel_size == "S"
     finally:
-        _teardown(application)
+        teardown_app(application)
 
 
 def test_a_single_file_shows_working_only_after_a_moment(app: Application) -> None:
@@ -511,7 +504,7 @@ def test_the_registry_is_the_truth_at_start_and_the_setting_after(
     assert recorded_autostart == [True]
     app.settings_store.update(start_with_windows=False)  # the user's own change: written
     assert recorded_autostart == [True, False]
-    _teardown(app)
+    teardown_app(app)
 
     monkeypatch.setattr(autostart, "is_enabled", lambda **_: True)  # the installer's checkbox
     save_settings(app_paths_tmp.settings_file, Settings(start_with_windows=False))
@@ -794,7 +787,7 @@ def test_elevated_gate(app_paths_tmp: AppPaths, choice: str, restart_ok: bool, c
         assert app.startup_checks() == code
         assert explained == ([True] if choice == "restart" and not restart_ok else [])
     finally:
-        _teardown(app)
+        teardown_app(app)
 
 
 def test_motion_switch_follows_the_argument() -> None:
@@ -803,3 +796,127 @@ def test_motion_switch_follows_the_argument() -> None:
     assert motion_switch("on")() is True
     assert motion_switch("off")() is False
     assert motion_switch("auto") is system.animations_enabled
+
+
+# --------------------------------------------------------------------------- plugins (S6)
+FIXTURE_PLUGINS = Path(__file__).resolve().parents[1] / "fixtures" / "plugins"
+
+
+def install_fixture(paths: AppPaths, name: str) -> Path:
+    """Copy a fixture plugin into the test profile under its id, as a user would."""
+    target = paths.plugins_dir / f"test.{name}"
+    shutil.copytree(FIXTURE_PLUGINS / name, target)
+    return target
+
+
+def test_plugins_are_disabled_until_enabled_and_a_change_reaches_the_wheel_and_the_workers(
+    make_app: MakeApp, app_paths_tmp: AppPaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase-2 §3: trust; phase-3 §2.3: the arc in the settings' order; S6 wiring."""
+    install_fixture(app_paths_tmp, "echo")
+    install_fixture(app_paths_tmp, "crash")  # never run here: it only needs an id and a target
+    app = make_app()
+    assert app.registry.broken == ()  # the control: both folders are usable plugins
+    assert [e.id for e in app.registry.third_party] == ["test.crash", "test.echo"]
+    assert not any(e.enabled for e in app.registry.third_party)
+    png = FileInfo.from_path(Path("x.png")).with_sniff(Sniff(FormatId.PNG, False))
+    assert app.catalog.plan([png]).slots[MORE_SLOT].reason is Reason.NO_PLUGINS
+    assert app.catalog.target("test.echo:copy") is None
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        app.pool,
+        "reconfigure",
+        lambda specs, force=False: calls.append([s.plugin_id for s in specs]),
+    )
+    app.settings_store.update(paused=True)  # an unrelated change rebuilds nothing
+    assert calls == []
+
+    app.settings_store.update(plugins=PluginPrefs(enabled=("test.echo",)))
+    assert calls == [["pillow_images", "test.echo"]]  # the workers first…
+    assert app.catalog.target("test.echo:copy") is not None  # …then the catalog
+    assert app.window._catalog is app.catalog
+    assert app.dispatcher._catalog is app.catalog
+    arc = [s.target.id for s in app.catalog.plan([png]).more if s.target]
+    assert arc == ["test.echo:copy"]
+
+    both = PluginPrefs(enabled=("test.echo", "test.crash"), order=("test.crash", "test.echo"))
+    app.settings_store.update(plugins=both)
+    arc = [s.target.id for s in app.catalog.plan([png]).more if s.target]
+    assert arc == ["test.crash:copy", "test.echo:copy"]
+    app.settings_store.update(plugins=PluginPrefs(enabled=both.enabled, order=("test.echo",)))
+    arc = [s.target.id for s in app.catalog.plan([png]).more if s.target]
+    assert arc == ["test.echo:copy", "test.crash:copy"]  # the rest follow by folder name
+    assert calls[-1] == ["pillow_images", "test.echo", "test.crash"]
+
+    # A folder removed while the app runs: the page asks for a rescan.
+    shutil.rmtree(app_paths_tmp.plugins_dir / "test.crash")
+    app.rescan_plugins()
+    assert app.registry.entry("test.crash") is None  # still in the settings, names nothing
+    assert app.catalog.target("test.crash:copy") is None
+    assert calls[-1] == ["pillow_images", "test.echo"]
+
+
+def test_the_plugins_page_and_the_trust_prompt_drive_the_registry(
+    make_app: MakeApp,
+    app_paths_tmp: AppPaths,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_folders: list[Path],
+) -> None:
+    """Phase-3 §6.2 and §6.5 wired: the rows, the prompt, the folder, the rescan."""
+    install_fixture(app_paths_tmp, "echo")
+    app = make_app()
+    forced: list[bool] = []
+    monkeypatch.setattr(app.pool, "reconfigure", lambda specs, force=False: forced.append(force))
+    app.show_settings("plugins")
+    window = app.settings_window
+    assert window is not None
+    assert window.plugin_rows() == (("test.echo", False),)
+
+    # The switch asks; the prompt names the plugin; Enable writes the trust record.
+    window.plugin_list.item(0).setCheckState(Qt.CheckState.Checked)
+    assert window.plugin_rows() == (("test.echo", False),)  # reverted: the prompt decides
+    assert app.trust.plugin_id == "test.echo"
+    assert app.trust.box is not None
+    assert str(app_paths_tmp.plugins_dir / "test.echo") in app.trust.box.informativeText()
+    assert load_settings(app.paths.settings_file).settings.plugins.enabled == ()
+    assert app.trust.enable_button is not None
+    app.trust.enable_button.click()
+    assert load_settings(app.paths.settings_file).settings.plugins.enabled == ("test.echo",)
+    assert app.catalog.target("test.echo:copy") is not None
+    assert window.plugin_rows() == (("test.echo", True),)
+    assert forced == [False]
+
+    # Unchecking writes at once, no prompt.
+    window.plugin_list.item(0).setCheckState(Qt.CheckState.Unchecked)
+    assert not app.trust.is_open
+    assert load_settings(app.paths.settings_file).settings.plugins.enabled == ()
+    assert app.catalog.target("test.echo:copy") is None
+
+    # No prompt mid-drag (C1); none for an unknown or already enabled id.
+    app.window.show()
+    window.plugin_enable_requested.emit("test.echo")
+    assert not app.trust.is_open
+    app.window.hide()
+    window.plugin_enable_requested.emit("nope")
+    assert not app.trust.is_open
+
+    # A prompt whose plugin disappears is dismissed by the rescan that notices.
+    window.plugin_enable_requested.emit("test.echo")
+    assert app.trust.plugin_id == "test.echo"
+    shutil.rmtree(app_paths_tmp.plugins_dir / "test.echo")
+    window.rescan.click()
+    assert not app.trust.is_open
+    assert window.plugin_rows() == ()
+    assert forced[-1] is True  # a rescan replaces the workers
+
+    # The folder button creates Morphwheel's folder if need be, then opens it.
+    shutil.rmtree(app_paths_tmp.plugins_dir)
+    window.open_plugins_folder.click()
+    assert app_paths_tmp.plugins_dir.is_dir()
+    assert opened_folders == [app_paths_tmp.plugins_dir]
+
+    # A plugin copied in later shows up on Rescan, disabled.
+    install_fixture(app_paths_tmp, "crash")
+    window.rescan.click()
+    assert window.plugin_rows() == (("test.crash", False),)
