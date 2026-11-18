@@ -22,6 +22,7 @@ Rules:
 from __future__ import annotations
 
 import re
+import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -30,9 +31,12 @@ from pathlib import Path
 from morphwheel.core.catalog import SlotPos, Target, TargetKind
 from morphwheel.core.formats import FormatId
 from morphwheel.plugins.api import API_VERSION
+from morphwheel.plugins.loader import top_module
 
 MANIFEST_NAME = "plugin.toml"
+MAX_MANIFEST_BYTES = 64 * 1024  # a manifest is a few hundred bytes; more is not one
 MAX_LABEL = 16  # fits a wheel slot
+BUILTIN_PLUGIN_ID = "pillow_images"  # the one bundled plugin, under ``BUILTIN_DIR``
 _PLUGIN_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _TARGET_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 _ENTRY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*$")
@@ -72,7 +76,7 @@ def parse_manifest(text: str, *, directory: Path, is_builtin: bool) -> Manifest:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
         raise ManifestError(f"not valid TOML: {e}") from None
-    plugin = _plugin(_table(data, "plugin"))
+    plugin = _plugin(_table(data, "plugin"), is_builtin=is_builtin)
     raw_targets = data.get("targets")
     if not isinstance(raw_targets, list) or not raw_targets:
         raise ManifestError("targets: at least one [[targets]] table is required")
@@ -87,11 +91,22 @@ def parse_manifest(text: str, *, directory: Path, is_builtin: bool) -> Manifest:
 
 
 def load_manifest(path: Path, *, is_builtin: bool) -> Manifest:
-    """Read ``path`` (a ``plugin.toml``) and parse it. Its directory becomes the plugin's."""
+    """Read ``path`` (a ``plugin.toml``) and parse it. Its directory becomes the plugin's.
+
+    At most ``MAX_MANIFEST_BYTES`` are read, whatever the file's size says: a third-party
+    manifest is untrusted input, and the GUI reads it at start (S6).
+    """
     try:
-        text = path.read_text(encoding="utf-8")
+        with path.open("rb") as f:
+            data = f.read(MAX_MANIFEST_BYTES + 1)
     except OSError as e:
         raise ManifestError(f"can't read {path.name}: {e.strerror}") from None
+    if len(data) > MAX_MANIFEST_BYTES:
+        raise ManifestError(f"{path.name} is larger than {MAX_MANIFEST_BYTES // 1024} KiB")
+    try:
+        text = data.decode("utf-8-sig")  # a BOM (PowerShell's Out-File) is tolerated
+    except UnicodeDecodeError:
+        raise ManifestError(f"{path.name}: not UTF-8 text") from None
     return parse_manifest(text, directory=path.parent, is_builtin=is_builtin)
 
 
@@ -104,7 +119,16 @@ def builtin_manifest() -> Manifest:
     Located by path, not by import: the GUI never imports anything under ``builtin`` (R5), and the
     frozen app ships ``plugin.toml`` as a data file next to the code (phase-4 §8).
     """
-    return load_manifest(BUILTIN_DIR / "pillow_images" / MANIFEST_NAME, is_builtin=True)
+    return load_manifest(BUILTIN_DIR / BUILTIN_PLUGIN_ID / MANIFEST_NAME, is_builtin=True)
+
+
+RESERVED_TOP_NAMES = frozenset({"morphwheel", "PIL", "pillow_heif"})  # the app and what it bundles
+
+
+def _reserved_name(top: str) -> bool:
+    """A top-level module name a third-party plugin can't own (RD-28): a worker's import of
+    it would find the app's, Pillow's or Python's module, never the plugin's file."""
+    return top in RESERVED_TOP_NAMES or top in sys.stdlib_module_names
 
 
 # --------------------------------------------------------------------------- fields
@@ -124,7 +148,7 @@ def _string(table: Mapping[str, object], key: str, *, where: str, maxlen: int = 
     return value
 
 
-def _plugin(table: Mapping[str, object]) -> PluginInfo:
+def _plugin(table: Mapping[str, object], *, is_builtin: bool) -> PluginInfo:
     pid = _string(table, "id", where="plugin", maxlen=64)
     if not _PLUGIN_ID.match(pid):
         raise ManifestError("plugin.id: lowercase letters, digits, '.', '_' and '-' only")
@@ -140,6 +164,11 @@ def _plugin(table: Mapping[str, object]) -> PluginInfo:
     entry = _string(table, "entry", where="plugin")
     if not _ENTRY.match(entry):
         raise ManifestError('plugin.entry: expected "module.path:ClassName"')
+    if not is_builtin and _reserved_name(top_module(entry)):
+        raise ManifestError(
+            f"plugin.entry: the module name {top_module(entry)!r} belongs to the app, Pillow or "
+            f"Python; use your own (the plugin id is a safe name)"
+        )
     return PluginInfo(
         id=pid,
         name=_string(table, "name", where="plugin", maxlen=80),

@@ -6,8 +6,6 @@ Traceability (phase-4 §3): a crashed or timed-out worker is replaced and the ta
 
 from __future__ import annotations
 
-import logging
-import threading
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
@@ -15,12 +13,11 @@ import pytest
 
 from morphwheel.core.errors import ErrorCode
 from morphwheel.core.jobs import Task, TaskResult, TaskStatus
-from morphwheel.engine.worker_main import Progress
 from morphwheel.engine.worker_pool import WorkerPool
 from morphwheel.plugins.loader import PluginSpec
 from morphwheel.plugins.manifest import MANIFEST_NAME, builtin_manifest, load_manifest
 
-from .conftest import plugin_dir
+from .conftest import Collector, plugin_dir
 
 pytestmark = pytest.mark.integration
 
@@ -31,28 +28,6 @@ for _name in ("echo", "crash", "sleep"):
     _m = load_manifest(plugin_dir(_name) / MANIFEST_NAME, is_builtin=False)
     PLUGINS.append(PluginSpec(_m.plugin.id, _m.plugin.entry, _m.directory))
     TARGETS[_m.targets[0].id] = _m.targets[0]
-
-
-class Collector:
-    def __init__(self) -> None:
-        self.results: list[TaskResult] = []
-        self.progress: list[Progress] = []
-        self.records: list[logging.LogRecord] = []
-        self._event = threading.Event()
-        self._expected = 0
-
-    def expect(self, n: int) -> None:
-        self._expected = n
-        self._event.clear()
-
-    def done(self, result: TaskResult) -> None:
-        self.results.append(result)
-        if len(self.results) >= self._expected:
-            self._event.set()
-
-    def wait(self, timeout_s: float = 60.0) -> list[TaskResult]:
-        assert self._event.wait(timeout_s), f"got {len(self.results)} of {self._expected} results"
-        return self.results
 
 
 @pytest.fixture
@@ -173,3 +148,49 @@ def test_shutdown_is_quick_and_a_stopped_pool_fails_tasks_at_once(
     assert [r.error for r in results] == [ErrorCode.WORKER_CRASHED]  # the job can still finish
     assert "not running" in (results[0].detail or "")
     p.shutdown()  # idempotent
+
+
+def test_reconfigure_is_the_gate_both_ways_and_replaces_the_worker(
+    images: Mapping[str, Path], tmp_path: Path
+) -> None:
+    """S6: a worker loads only the plugins it was configured with; a change respawns it."""
+    c = Collector()
+    p = WorkerPool(size=1, task_timeout_s=10.0, plugins=PLUGINS[:1], on_log=c.records.append)
+    p.start()
+    try:
+        (first,) = p.wait_ready()
+        c.expect(1)
+        p.run(task(1, images["photo.bmp"], "test.echo:copy", tmp_path / "fb"), c.done)
+        (refused,) = c.wait()
+        assert refused.error is ErrorCode.PLUGIN_ERROR
+        assert (refused.detail or "").startswith("no plugin provides")
+
+        p.reconfigure(PLUGINS)  # echo enabled: the next task runs on a fresh worker
+        c.expect(2)
+        p.run(task(2, images["photo.bmp"], "test.echo:copy", tmp_path / "fb"), c.done)
+        results = c.wait()
+        assert results[1].status is TaskStatus.OK
+        (second,) = p.wait_ready()
+        assert second.pid != first.pid
+
+        p.reconfigure(PLUGINS)  # the same set: nothing happens, the worker stays
+        c.expect(3)
+        p.run(task(3, images["photo.bmp"], "test.echo:copy", tmp_path / "fb"), c.done)
+        assert c.wait()[2].status is TaskStatus.OK
+        assert p.wait_ready()[0].pid == second.pid
+        p.reconfigure(PLUGINS, force=True)  # a replaced folder: the worker must go
+        c.expect(4)
+        p.run(task(4, images["photo.bmp"], "test.echo:copy", tmp_path / "fb"), c.done)
+        assert c.wait()[3].status is TaskStatus.OK
+        (forced,) = p.wait_ready()
+        assert forced.pid != second.pid
+
+        p.reconfigure(PLUGINS[:1])  # echo disabled again: refused, on yet another worker
+        c.expect(5)
+        p.run(task(5, images["photo.bmp"], "test.echo:copy", tmp_path / "fb"), c.done)
+        results = c.wait()
+        assert results[4].error is ErrorCode.PLUGIN_ERROR
+        (last,) = p.wait_ready()
+        assert last.pid not in {first.pid, second.pid, forced.pid}
+    finally:
+        p.shutdown()

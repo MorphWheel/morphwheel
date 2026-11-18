@@ -29,6 +29,28 @@ class FormatId(StrEnum):
     ICO = "ico"
     PDF = "pdf"
 
+    @property
+    def label(self) -> str:
+        """The name the wheel shows (phase-3 §2.2): ``JPG``, not ``JPEG``. The builtin
+        manifest's target labels match it (a test holds them to it)."""
+        return _LABELS[self]
+
+
+_LABELS: Mapping[FormatId, str] = MappingProxyType(
+    {
+        FormatId.JPEG: "JPG",
+        FormatId.PNG: "PNG",
+        FormatId.WEBP: "WebP",
+        FormatId.AVIF: "AVIF",
+        FormatId.HEIC: "HEIC",
+        FormatId.BMP: "BMP",
+        FormatId.TIFF: "TIFF",
+        FormatId.GIF: "GIF",
+        FormatId.ICO: "ICO",
+        FormatId.PDF: "PDF",
+    }
+)
+
 
 EXTENSIONS: Mapping[str, FormatId] = MappingProxyType(
     {

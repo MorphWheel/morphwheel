@@ -1,5 +1,5 @@
 """The dialogs (phase-3 §6.4; RD-22): the elevated warning, the Details window, the download
-consent, and the one "bring a window back" helper.
+consent, the plugin trust prompt (§6.5, S6), and the one "bring a window back" helper.
 
 Rules:
 
@@ -8,8 +8,12 @@ Rules:
   with signals: a modal box would block every toast's buttons and make the wheel refuse drags.
 - **A consent before any network use (A6).** The download box names the file, its size, the
   source (PyPI) and the licence (GPLv2) and answers through a signal; its keyboard default is
-  Cancel, as phase-3 §6.5 sets for the plugin trust prompt (S6), so Return never starts a download
+  Cancel, as phase-3 §6.5 sets for the plugin trust prompt, so Return never starts a download
   the user hasn't read about.
+- **A warning before any plugin runs (phase-2 §3, §6.5).** The trust prompt names the plugin,
+  its version and its folder, says that plugins run with the user's permissions, and answers
+  with the plugin's id through ``confirmed``; Cancel is the keyboard default. One prompt at a
+  time: a second ask replaces the first, and the app dismisses a prompt whose plugin went away.
 - **One window, reused.** ``DetailsWindow`` and the consent box are built once and brought back.
 - Slots are bound methods or signals (see ``toasts/manager.py``); no lambda captures ``self``.
 - Plain text wherever a file name can appear. Every string goes through ``translate("Dialogs", …)``.
@@ -18,6 +22,8 @@ Rules:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
 from typing import Literal
 
 from PySide6.QtCore import QObject, Qt, Signal
@@ -47,6 +53,24 @@ def bring_to_front(window: QWidget) -> None:
         window.show()
     window.raise_()
     window.activateWindow()
+
+
+def consent_box(
+    question: str, confirm: str, on_clicked: Callable[[QAbstractButton], None]
+) -> tuple[QMessageBox, QAbstractButton]:
+    """A non-modal question with Cancel and one confirming button (phase-3 §6.5): Cancel is
+    the keyboard default and the escape, so Return never confirms unread; the texts are plain,
+    since a file name or a manifest's name can land in them. Returns the box and the button."""
+    box = QMessageBox(QMessageBox.Icon.Question, "Morphwheel", "")
+    box.setWindowModality(Qt.WindowModality.NonModal)
+    box.setText(question)
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    cancel = box.addButton(translate("Dialogs", "Cancel"), QMessageBox.ButtonRole.RejectRole)
+    button = box.addButton(confirm, QMessageBox.ButtonRole.AcceptRole)
+    box.setDefaultButton(cancel)
+    box.setEscapeButton(cancel)
+    box.buttonClicked.connect(on_clicked)
+    return box, button
 
 
 # --------------------------------------------------------------------------- elevated (§6.4)
@@ -142,20 +166,11 @@ class HeicConsent(QObject):
 
     def ask(self, wheel_name: str, size: int) -> None:
         if self.box is None:
-            box = QMessageBox(QMessageBox.Icon.Question, "Morphwheel", "")
-            box.setWindowModality(Qt.WindowModality.NonModal)
-            box.setText(translate("Dialogs", "Install HEIC support?"))
-            box.setTextFormat(Qt.TextFormat.PlainText)
-            cancel = box.addButton(
-                translate("Dialogs", "Cancel"), QMessageBox.ButtonRole.RejectRole
+            self.box, self.install_button = consent_box(
+                translate("Dialogs", "Install HEIC support?"),
+                translate("Dialogs", "Install"),
+                self._on_clicked,
             )
-            self.install_button = box.addButton(
-                translate("Dialogs", "Install"), QMessageBox.ButtonRole.AcceptRole
-            )
-            box.setDefaultButton(cancel)  # Return never starts a download unread (§6.5)
-            box.setEscapeButton(cancel)
-            box.buttonClicked.connect(self._on_clicked)
-            self.box = box
         self.box.setInformativeText(
             translate(
                 "Dialogs",
@@ -170,3 +185,53 @@ class HeicConsent(QObject):
     def _on_clicked(self, button: QAbstractButton) -> None:
         if button is self.install_button:
             self.confirmed.emit()
+
+
+class PluginTrustPrompt(QObject):
+    """ "Enable plugin?" (phase-3 §6.5): the plugin, its folder, the warning. Non-modal; Cancel is
+    the keyboard default; ``confirmed`` carries the plugin id. The folder path is shown as plain
+    text and never leaves the machine."""
+
+    confirmed = Signal(str)  # the plugin id
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.box: QMessageBox | None = None  # built at the first ask, then reused
+        self.enable_button: QAbstractButton | None = None
+        self._plugin_id: str | None = None
+
+    @property
+    def is_open(self) -> bool:
+        return self.box is not None and self.box.isVisible()
+
+    @property
+    def plugin_id(self) -> str | None:
+        """The plugin the open prompt is about; ``None`` once answered or dismissed."""
+        return self._plugin_id if self.is_open else None
+
+    def ask(self, plugin_id: str, name: str, version: str, directory: Path) -> None:
+        if self.box is None:
+            self.box, self.enable_button = consent_box(
+                translate("Dialogs", "Enable plugin?"),
+                translate("Dialogs", "Enable"),
+                self._on_clicked,
+            )
+        self._plugin_id = plugin_id
+        warning = translate(
+            "Dialogs",
+            "Plugins run Python code with your user permissions. Only enable plugins from "
+            "sources you trust.",
+        )
+        self.box.setInformativeText(f"{name} {version}\n{directory}\n\n{warning}")
+        bring_to_front(self.box)
+
+    def dismiss(self) -> None:
+        """The plugin went away (a rescan) or was enabled elsewhere: the question is moot."""
+        self._plugin_id = None
+        if self.box is not None:
+            self.box.hide()
+
+    def _on_clicked(self, button: QAbstractButton) -> None:
+        plugin_id, self._plugin_id = self._plugin_id, None
+        if button is self.enable_button and plugin_id is not None:
+            self.confirmed.emit(plugin_id)
