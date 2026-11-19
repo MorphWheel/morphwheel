@@ -63,6 +63,30 @@ def test_qt_license_texts_are_bundled() -> None:
     assert "END OF TERMS AND CONDITIONS" in gpl  # the whole text, not a stub
 
 
+def test_the_extra_texts_are_bundled_per_folder() -> None:
+    """``packaging/licenses/<folder>/*.txt`` reaches ``licenses/<folder>/``: today aom's LICENSE and
+    PATENTS (the AV1 encoder compiled into Pillow's libavif; Pillow's license file omits them)."""
+    aom = {src.name: src for src, folder in license_files() if folder == "aom"}
+    assert sorted(aom) == ["LICENSE.txt", "PATENTS.txt"]
+    assert "Alliance for Open Media" in aom["LICENSE.txt"].read_text(encoding="utf-8")
+    assert "Patent License 1.0" in aom["PATENTS.txt"].read_text(encoding="utf-8")
+
+
+def test_pillow_carries_no_gpl_or_lgpl_codec() -> None:
+    """Pillow's SBOM lists libimagequant (GPL-3.0) and FriBiDi (LGPL-2.1) among the libraries its
+    wheels *may* link; the Windows wheel links neither, and THIRD_PARTY_NOTICES.md says so. A
+    Pillow upgrade that brings one in is the A6 class of problem and must fail here first. The aom
+    encoder and dav1d decoder are what the notices name for AVIF."""
+    from PIL import _avif, features
+
+    assert features.check("libimagequant") is False
+    assert features.check("raqm") is False  # raqm is what pulls FriBiDi in
+    assert _avif.encoder_codec_available("aom") is True
+    assert _avif.decoder_codec_available("dav1d") is True
+    for codec in ("rav1e", "svt"):
+        assert _avif.encoder_codec_available(codec) is False, codec  # not in the notices
+
+
 def test_the_datas_land_under_licenses() -> None:
     for src, dest in datas():
         assert Path(src).is_file()

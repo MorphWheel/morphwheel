@@ -3,3 +3,4 @@
 *.png binary
 *.svg text eol=lf
 packaging/licenses/*.txt text eol=lf
+packaging/licenses/*/*.txt text eol=lf

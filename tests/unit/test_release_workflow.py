@@ -120,9 +120,14 @@ def test_the_build_chain_is_in_the_specs_order(steps: dict[str, list[dict[str, A
         _index(build, "Sign the installer"),
         _index(build, "Use the signed installer"),
         _index(build, "Checksums and release notes"),
+        _index(build, "winget manifests"),
         _index(build, "Upload the release files"),
     ]
     assert order == sorted(order)
+    winget = _step(build, "winget manifests")  # after the signed installer and its checksum
+    assert "if" not in winget  # the rehearsal renders it too
+    assert "winget $env:VERSION" in winget["run"]
+    assert winget["run"].rstrip().endswith(r"-o packaging\output\installer\winget")
     assert (
         _step(build, "Install the dev extra")["run"] == 'python -m pip install -e ".[dev]"'
     )  # never [heic] (A6)
