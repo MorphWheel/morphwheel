@@ -39,7 +39,7 @@
 | S4: Final wheel | M2 | L | `[x]` ✅ approved 2026-11-04 (C28–C31 👤) |
 | S5: Surrounding UI (toasts, tray, settings, bubble, dialogs, autostart, i18n) | M2 | L | `[x]` ✅ approved 2026-11-12 (C32–C39 👤) |
 | S6: Plugin system | M3 | M | `[x]` ✅ approved 2026-11-18 (C40, C41 👤) |
-| S7: Release v0.1 | M4 | M | `[x]` ✅ approved 2026-11-19 (C42, C43 and the release steps 👤); files 1 to 5 pushed (1fc3710, 531eeb7), CI green; file 6 and the report uncommitted |
+| S7: Release v0.1 | M4 | M | `[x]` ✅ approved 2026-11-19 (C42, C43 and the release steps 👤); all pushed 2026-11-19 (1fc3710, 531eeb7, 147f8d6), CI green |
 
 ---
 
@@ -305,7 +305,7 @@ A code review of the fixes found 8 more issues. 5 are fixed, including a name li
 
 ## Work log (newest first)
 
-- **2026-11-19**: Yuval approved S7 with RD-29 to RD-32 (RD-31 incl. i) and the post-v0.1 carry-overs (A2). The release steps stay his: SignPath (15), the rehearsal (16), the tag's version bump and changelog date (17), the checklist, publishing the draft, the winget PR. Not yet committed.
+- **2026-11-19**: Yuval approved S7 with RD-29 to RD-32 (RD-31 incl. i) and the post-v0.1 carry-overs (A2). The release steps stay his: SignPath (15), the rehearsal (16), the tag's version bump and changelog date (17), the checklist, publishing the draft, the winget PR. File 6, the report and the approval committed as 147f8d6 and pushed at Yuval's request; CI green. Session wrapped 2026-11-19: gates green (1120 tests), nothing in flight; this tracker note is the only change after 147f8d6. Next session: nothing to build until the release steps (👤 15, 16, 17, the checklist) move; then the post-v0.1 carry-overs listed under S7 and in the S7 report.
 - **2026-11-19 (S7 closed)**
   - `docs/sprints/S7.md`: the six files with their tests, the gates (1120 tests, 80 new in S7), the measurements against T5a, T6 and criterion 6, the §6 rows re-proven, the decisions RD-29 to RD-33 and RD-31i, the plan reviews, the findings (the working set, aom and the SBOM, winget on the runner, the intermittent access violation, CPython's license file), the proof posture, the carry-overs proposed for after v0.1, and the exit criteria: the files and the gates are done; the signed, published installer and the clean-VM checklist are Yuval's steps. Waiting for the S7 approval (A2). Nothing committed since 531eeb7.
 - **2026-11-19 (S7 file 6: docs/architecture.md)**
