@@ -3,21 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
 
 import morphwheel
+import release  # tools/ is on pytest's pythonpath
 
 ROOT = Path(__file__).resolve().parents[2]
-_spec = importlib.util.spec_from_file_location("release_tool", ROOT / "tools" / "release.py")
-assert _spec is not None
-assert _spec.loader is not None
-release = importlib.util.module_from_spec(_spec)
-sys.modules["release_tool"] = release
-_spec.loader.exec_module(release)
 
 CHANGELOG = """# Changelog
 

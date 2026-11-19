@@ -6,6 +6,7 @@
     python tools/release.py checksums a.exe -o SHA256SUMS.txt
     python tools/release.py verify SHA256SUMS.txt      # every listed file present with that digest
     python tools/release.py check-installer DIR --version 0.1.0 --max-mb 45
+    python tools/release.py winget 0.1.0 --installer morphwheel-0.1.0-setup.exe -o OUT
 
 Rules:
 
@@ -25,14 +26,25 @@ Rules:
   and still exits 0: a missing changelog entry is not a reason to lose a draft release.
 - ``check-installer`` holds T6 (installer download <= 45 MB) and the name: exactly one
   ``morphwheel-<version>-setup.exe`` in the folder.
+- ``winget`` renders the templates in ``packaging/winget/`` into
+  ``OUT/manifests/m/MorphWheel/Morphwheel/<version>/`` (the winget-pkgs layout, RD-32): the SHA-256
+  is taken from the installer file given (the signed one, in the workflow), the URL is the release
+  asset's, the date defaults to today (UTC). Placeholders are ``@name`` (``string.Template`` with
+  ``@``, so the ``$schema`` comments stay literal); the three templates together must use exactly
+  the known set, so a template that lost a placeholder is refused, not rendered half-filled; a
+  further ``<id>.locale.<tag>.yaml`` template (Hebrew, D3a) is rendered alongside the three. A
+  prerelease renders with a warning: winget-pkgs takes stable versions under the package
+  identifier (a preview would be a ``.Preview`` package). The PR to winget-pkgs is a human action.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import os
 import re
+import string
 import sys
 from pathlib import Path
 
@@ -40,12 +52,29 @@ REPO = Path(__file__).resolve().parents[1]
 VERSION_FILE = REPO / "src" / "morphwheel" / "__init__.py"
 RESOURCE_FILE = REPO / "packaging" / "pyinstaller" / "file_version_info.txt"
 CHANGELOG = REPO / "CHANGELOG.md"
+WINGET_TEMPLATES = REPO / "packaging" / "winget"
+WINGET_ID = "MorphWheel.Morphwheel"
+RELEASES_URL = "https://github.com/MorphWheel/morphwheel/releases"
+WINGET_PLACEHOLDERS = frozenset({"version", "sha256", "url", "date", "notes_url"})
+# The templates every render needs; every other <id>*.yaml beside them is rendered too (D3a).
+WINGET_REQUIRED = (
+    f"{WINGET_ID}.yaml",
+    f"{WINGET_ID}.installer.yaml",
+    f"{WINGET_ID}.locale.en-US.yaml",
+)
 _VERSION_LINE = re.compile(r'^__version__\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 _RESOURCE_LINE = re.compile(r"StringStruct\('ProductVersion',\s*'([^']+)'\)")
 _CANONICAL = re.compile(r"^\d+(\.\d+)*(?P<pre>(a|b|rc)\d+)?(\.post\d+)?(?P<dev>\.dev\d+)?$")
 _HEADING = re.compile(r"^## ")
 _LINK_REFERENCE = re.compile(r"^\[[^\]]+\]:\s*\S+")  # Keep a Changelog's trailing "[0.1.0]: url"
 _SUMS_LINE = re.compile(r"^([0-9a-f]{64})  (\S.*)$")
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+class _AtTemplate(string.Template):
+    """``@name`` / ``@{name}`` placeholders; ``@@`` is a literal ``@``. ``$`` is plain text."""
+
+    delimiter = "@"
 
 
 class ReleaseError(SystemExit):
@@ -99,12 +128,16 @@ def notes_section(version: str, changelog: Path = CHANGELOG) -> str | None:
     return "\n".join(body).strip() + "\n"
 
 
+def _sha256(path: Path) -> str:
+    with path.open("rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
 def checksums(files: list[Path]) -> str:
     """``sha256sum`` lines (two spaces, the file name only), sorted by name."""
     rows = []
     for path in sorted(files, key=lambda p: p.name):
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        rows.append(f"{digest}  {path.name}\n")
+        rows.append(f"{_sha256(path)}  {path.name}\n")
     return "".join(rows)
 
 
@@ -122,7 +155,7 @@ def verify(sums: Path, folder: Path | None = None) -> list[str]:
         target = folder / name
         if not target.is_file():
             raise ReleaseError(f"{name}: listed in {sums.name} but missing")
-        if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+        if _sha256(target) != digest:
             raise ReleaseError(f"{name}: SHA-256 does not match {sums.name}")
         verified.append(name)
     if not verified:
@@ -133,7 +166,7 @@ def verify(sums: Path, folder: Path | None = None) -> list[str]:
 def check_installer(folder: Path, version: str, max_mb: float) -> Path:
     """Exactly one ``morphwheel-<version>-setup.exe`` in ``folder``, at most ``max_mb`` MB (T6)."""
     exes = sorted(folder.glob("*.exe"))
-    expected = f"morphwheel-{version}-setup.exe"
+    expected = installer_name(version)
     if [p.name for p in exes] != [expected]:
         raise ReleaseError(
             f"expected exactly {expected} in {folder}, found {[p.name for p in exes]}"
@@ -143,6 +176,70 @@ def check_installer(folder: Path, version: str, max_mb: float) -> Path:
         raise ReleaseError(f"{expected} is {size_mb:.1f} MB, over the {max_mb:g} MB limit (T6)")
     print(f"{expected}: {size_mb:.1f} MB (limit {max_mb:g} MB)")
     return exes[0]
+
+
+def installer_name(version: str) -> str:
+    return f"morphwheel-{version}-setup.exe"
+
+
+def winget_manifest_dir(root: Path, version: str, package_id: str = WINGET_ID) -> Path:
+    """winget-pkgs' layout: ``manifests/<first letter, lowercase>/<segment>.../<version>``."""
+    return root.joinpath("manifests", package_id[0].lower(), *package_id.split("."), version)
+
+
+def render_winget(
+    version: str,
+    installer: Path,
+    date: str | None = None,
+    templates: Path = WINGET_TEMPLATES,
+) -> dict[str, str]:
+    """The manifests, file name to text, from the templates and the installer file."""
+    expected = installer_name(version)
+    if installer.name != expected:
+        raise ReleaseError(f"the installer must be named {expected}, not {installer.name}")
+    if not installer.is_file():
+        raise ReleaseError(f"{installer}: not a file")
+    date = date or dt.datetime.now(dt.UTC).strftime("%Y-%m-%d")
+    try:
+        if not _ISO_DATE.match(date):
+            raise ValueError
+        dt.date.fromisoformat(date)  # a real calendar date, not just the shape
+    except ValueError:
+        raise ReleaseError(f"--date must be a YYYY-MM-DD date, not {date!r}") from None
+    values = {
+        "version": version,
+        "sha256": _sha256(installer).upper(),
+        "url": f"{RELEASES_URL}/download/v{version}/{expected}",
+        "date": date,
+        "notes_url": f"{RELEASES_URL}/tag/v{version}",
+    }
+    files = sorted(templates.glob(f"{WINGET_ID}*.yaml"))
+    missing = sorted(set(WINGET_REQUIRED) - {p.name for p in files})
+    if missing:
+        raise ReleaseError(f"missing template(s) in {templates}: {missing}")
+    parsed = {path.name: _AtTemplate(path.read_text(encoding="utf-8")) for path in files}
+    used = {name for t in parsed.values() for name in t.get_identifiers()}
+    if used != WINGET_PLACEHOLDERS:
+        raise ReleaseError(
+            f"the templates use {sorted(used)}, expected exactly {sorted(WINGET_PLACEHOLDERS)}"
+        )
+    return {name: template.substitute(values) for name, template in parsed.items()}
+
+
+def write_winget(version: str, installer: Path, out: Path, date: str | None = None) -> Path:
+    """Render into ``out`` (UTF-8, LF; existing files of the same names are replaced)."""
+    rendered = render_winget(version, installer, date)
+    folder = winget_manifest_dir(out, version)
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, text in rendered.items():
+        (folder / name).write_bytes(text.encode("utf-8"))
+    if is_prerelease(version):
+        print(
+            f"::warning::{version} is a prerelease: winget-pkgs takes stable versions under "
+            f"{WINGET_ID}; a preview would be its own package ({WINGET_ID}.Preview)"
+        )
+    print(f"winget manifests: {folder}")
+    return folder
 
 
 def _emit(text: str, output: Path | None) -> None:
@@ -185,6 +282,11 @@ def main(argv: list[str] | None = None) -> int:
     inst.add_argument("folder", type=Path)
     inst.add_argument("--version", required=True)
     inst.add_argument("--max-mb", type=float, default=45.0)
+    wg = sub.add_parser("winget", help="render the winget manifests for VERSION into -o")
+    wg.add_argument("version")
+    wg.add_argument("--installer", required=True, type=Path, help="the (signed) installer file")
+    wg.add_argument("--date", help="ReleaseDate, YYYY-MM-DD; default today (UTC)")
+    wg.add_argument("-o", "--output", required=True, type=Path, help="the output root")
     args = parser.parse_args(argv)
 
     if args.command in ("version", "check-tag"):
@@ -210,6 +312,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "verify":
         for name in verify(args.sums, args.dir):
             print(f"{name}: OK")
+        return 0
+    if args.command == "winget":
+        write_winget(args.version, args.installer, args.output, args.date)
         return 0
     check_installer(args.folder, args.version, args.max_mb)
     return 0

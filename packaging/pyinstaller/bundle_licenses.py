@@ -2,9 +2,11 @@
 
 Collected at build time from the installed distributions of the runtime dependencies (their
 ``dist-info`` license files) plus Python's own ``LICENSE.txt`` and the texts under
-``packaging/licenses/`` that a wheel doesn't carry (Qt's LGPL-3.0 and GPL-3.0: the PySide6 wheels
-ship only the commercial reference file). The spec adds the result to the bundle as
-``licenses/<name>/<file>``; ``THIRD_PARTY_NOTICES.md`` (S7 docs) is the human summary.
+``packaging/licenses/`` that a wheel doesn't carry: the ``*.txt`` at its top are Qt's (LGPL-3.0 and
+GPL-3.0: the PySide6 wheels ship only the commercial reference file), and each subfolder is a
+component of its own (``aom/``: the AV1 encoder inside Pillow's libavif, whose texts Pillow's
+license file omits). The spec adds the result to the bundle as ``licenses/<name>/<file>``;
+``THIRD_PARTY_NOTICES.md`` is the human summary.
 
 Qt-free and importable by the spec (``packaging/pyinstaller`` put on ``sys.path`` for the import,
 then taken off) and by a test.
@@ -65,6 +67,12 @@ def license_files() -> list[tuple[Path, str]]:
     if not qt_texts:  # the test fails on this; the build says it, so a measuring build can run
         print(f"licenses: no Qt texts under {EXTRA_TEXTS}; the bundle must not ship without them")
     found += [(p, "Qt") for p in qt_texts]
+    if EXTRA_TEXTS.is_dir():
+        for folder in sorted(p for p in EXTRA_TEXTS.iterdir() if p.is_dir()):
+            texts = sorted(folder.glob("*.txt"))
+            if not texts:
+                raise LicenseError(f"{folder} holds no .txt license text")
+            found += [(p, folder.name) for p in texts]
     return found
 
 

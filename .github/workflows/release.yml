@@ -1,8 +1,9 @@
 # A `v*` tag builds the frozen app and the installer, signs both through SignPath when the repository
 # is configured for it, and leaves a DRAFT GitHub Release with the installer, its checksum file and
-# the release notes. Publishing the draft (and the winget PR) stays a human action (phase-4 section 8.3,
-# section 8.4; RD-31). A manual run is a rehearsal: it builds and uploads the artifacts, signs nothing and
-# creates no release.
+# the release notes. The run's artifact also carries the rendered winget manifests (packaging/winget,
+# RD-32); they are not release assets. Publishing the draft and the winget PR stay human actions
+# (phase-4 section 8.3, section 8.4; RD-31). A manual run is a rehearsal: it builds and uploads the
+# artifacts, signs nothing and creates no release.
 #
 # Rules:
 # - The tag must equal v<__version__>, and the version resource must agree, or the run stops before
@@ -172,6 +173,11 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           python tools/release.py checksums (Get-ChildItem packaging\output\installer\*.exe).FullName -o packaging\output\installer\SHA256SUMS.txt
           python tools/release.py notes $env:VERSION -o packaging\output\installer\release-notes.md
+
+      - name: winget manifests (the PR to winget-pkgs stays a human step)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python tools/release.py winget $env:VERSION --installer "packaging\output\installer\morphwheel-${env:VERSION}-setup.exe" -o packaging\output\installer\winget
 
       - name: Upload the release files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
