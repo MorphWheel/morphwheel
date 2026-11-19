@@ -28,8 +28,6 @@ import hashlib
 import io
 import logging
 import shutil
-import urllib.request
-import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.util import find_spec
@@ -140,6 +138,8 @@ def remove_heic(engines_dir: Path) -> bool:
 
 
 def _download(url: str) -> bytes:
+    import urllib.request  # the HTTP stack only when a download runs, never at the GUI's start
+
     log.info("downloading %s", url)
     try:
         with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_S) as response:
@@ -150,6 +150,8 @@ def _download(url: str) -> bytes:
 
 
 def _extract(data: bytes, into: Path) -> None:
+    import zipfile
+
     """Take the package, the extension module and the DLLs; refuse paths that escape ``into``."""
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))

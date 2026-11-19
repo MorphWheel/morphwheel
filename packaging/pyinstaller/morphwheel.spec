@@ -7,8 +7,11 @@
   worker (S0 finding 1). Both share one ``_internal`` folder.
 - The builtin plugin's ``plugin.toml`` ships as a data file beside the code (read by path, R5).
 
-S0 built the drag probe from this spec; the probe now runs from source only. S7 finalizes the spec
-(icon, release naming, license texts).
+S0 built the drag probe from this spec; the probe now runs from source only. S7 finalizes the spec:
+the icon (``assets/icon/morphwheel.ico``, rendered by ``tools/make_icon.py`` from the same painter
+the windows use), the license texts under ``licenses/`` (``bundle_licenses.py`` beside this file), and
+the two Qt image-format plugins the app may load (``qsvg`` for the Fluent icons, ``qico``); the
+rest of ``imageformats`` stays out, as the S0 trim decided (images go through Pillow).
 
 Build from the repo root::
 
@@ -25,8 +28,13 @@ import sys
 from pathlib import Path
 
 HERE = Path(SPECPATH).resolve()  # noqa: F821 - SPECPATH is injected by PyInstaller
+sys.path.insert(0, str(HERE))
+from bundle_licenses import datas as license_datas  # noqa: E402
+
+sys.path.remove(str(HERE))
 ROOT = HERE.parents[1]
 SRC = ROOT / "src"
+ICON = ROOT / "assets" / "icon" / "morphwheel.ico"  # S7: the exe and the installer share it
 
 GUI_ENTRY = SRC / "morphwheel" / "__main__.py"
 WORKER_ENTRY = HERE / "worker_entry.py"
@@ -66,6 +74,7 @@ DATAS = [
         "morphwheel/builtin/pillow_images",
     )
 ]
+DATAS += license_datas()  # S7: every runtime dependency's text, Python's, Qt's
 TRANSLATIONS = SRC / "morphwheel" / "i18n" / "translations"
 if any(TRANSLATIONS.glob("*.qm")):  # tools/translations.py release; an empty glob aborts
     DATAS.append((str(TRANSLATIONS / "*.qm"), "morphwheel/i18n/translations"))
@@ -90,6 +99,10 @@ worker = Analysis(  # noqa: F821
 # and nothing else imports it.
 DROP_FILES = {"opengl32sw.dll", "libcrypto-3-x64.dll", "libssl-3-x64.dll", "qdirect2d.dll"}
 DROP_DIRS = ("plugins/tls/", "plugins/imageformats/", "plugins/generic/", "plugins/networkinformation/")
+KEEP_PLUGINS = (  # S7: SVG icons (the S4 carry-over) and .ico files, if ever loaded; by full path
+    "plugins/imageformats/qsvg.dll",
+    "plugins/imageformats/qico.dll",
+)
 
 # Python's own OpenSSL must stay: the frozen _ssl.pyd and _hashlib.pyd import exactly these, and the
 # opt-in HEIC download (A6) uses urllib over HTTPS. Other copies with the same names are on PATH, so
@@ -104,6 +117,8 @@ def _name(dest: str) -> str:
 
 def _keep(dest: str) -> bool:
     dest = dest.replace("\\", "/")
+    if dest.lower().endswith(KEEP_PLUGINS):
+        return True
     return _name(dest) not in DROP_FILES and not any(d in dest for d in DROP_DIRS)
 
 
@@ -114,6 +129,14 @@ for dll in PYTHON_OPENSSL:
     sources = [src for dest, src, _ in gui.binaries if _name(dest) == dll]
     if [os.path.normcase(os.path.realpath(os.path.dirname(s))) for s in sources] != [PYTHON_DLLS]:
         raise SystemExit(f"morphwheel.spec: bundle {dll} once, from {PYTHON_DLLS}; got {sources}")
+
+# The kept plugins need their Qt module beside them, or they fail to load without a word.
+gui_dests = {dest.replace("\\", "/").lower() for dest, _, _ in gui.binaries}
+missing = [p for p in KEEP_PLUGINS if not any(d.endswith(p) for d in gui_dests)]
+if missing:
+    raise SystemExit(f"morphwheel.spec: image-format plugins missing: {missing}")
+if not any(d.endswith("/qt6svg.dll") for d in gui_dests):
+    raise SystemExit("morphwheel.spec: qsvg.dll is kept but Qt6Svg.dll was not collected")
 
 # The worker's own analysis must be Qt-free before anything is built (R2, A5a).
 qt_in_worker = sorted(
@@ -136,6 +159,7 @@ gui_exe = EXE(  # noqa: F821
     console=False,
     upx=False,
     version=VERSION_FILE,
+    icon=str(ICON),
 )
 worker_exe = EXE(  # noqa: F821
     worker_pyz,
@@ -146,6 +170,7 @@ worker_exe = EXE(  # noqa: F821
     console=False,
     upx=False,
     version=VERSION_FILE,
+    icon=str(ICON),  # Task Manager shows the workers under the same mark
 )
 coll = COLLECT(  # noqa: F821
     gui_exe,
