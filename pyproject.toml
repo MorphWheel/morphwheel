@@ -40,6 +40,8 @@ dev = [
     "mypy==2.4.0",
     "import-linter==2.15",
     "pyinstaller==6.22.3",
+    "pyyaml==6.0.3",  # the release workflow is held by a structural test
+    "types-PyYAML==6.0.12.20261113",
 ]
 
 [project.gui-scripts]

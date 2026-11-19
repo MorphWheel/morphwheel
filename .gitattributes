@@ -1,0 +1,5 @@
+# Line endings and binaries (the repo is edited on Windows; CI checks out on Windows too).
+*.ico binary
+*.png binary
+*.svg text eol=lf
+packaging/licenses/*.txt text eol=lf

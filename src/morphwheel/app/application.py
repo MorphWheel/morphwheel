@@ -68,6 +68,7 @@ from morphwheel.settings.store import SettingsStore
 from morphwheel.ui.dialogs import DetailsWindow, ElevatedChoice, HeicConsent, PluginTrustPrompt
 from morphwheel.ui.dialogs import ask_elevated as ask_elevated_dialog
 from morphwheel.ui.dialogs import explain_failed_restart as explain_failed_restart_dialog
+from morphwheel.ui.icon import app_icon
 from morphwheel.ui.onboarding import ONBOARDING_DELAY_MS, ONBOARDING_KEY, onboarding_toast
 from morphwheel.ui.settings_window import SettingsWindow
 from morphwheel.ui.toasts.manager import ToastManager
@@ -218,6 +219,7 @@ class Application:
         self.qapp = existing if isinstance(existing, QApplication) else QApplication(list(argv))
         self.qapp.setApplicationName("Morphwheel")
         self.qapp.setApplicationVersion(__version__)
+        self.qapp.setWindowIcon(app_icon())  # the settings window, the prompts, the taskbar (S7)
         self.qapp.setQuitOnLastWindowClosed(False)  # the wheel hides; the app lives in the tray
 
         # The settings file (phase-4 §4.6): read once here and pushed to its owners below, then
