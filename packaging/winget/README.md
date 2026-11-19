@@ -38,9 +38,11 @@ python tools/release.py winget 0.1.0 --installer path\to\morphwheel-0.1.0-setup.
 winget validate --manifest out\manifests\m\MorphWheel\Morphwheel\0.1.0
 ```
 
-`winget validate` is the proof that the rendered set is a valid manifest. It runs here, not on CI:
-the GitHub-hosted Windows runners do not ship winget, so `tests/unit/test_winget.py` runs it when
-winget is on `PATH` and skips otherwise. The structural checks in that test run everywhere.
+`winget validate` is the proof that the rendered set is a valid manifest. `tests/unit/test_winget.py`
+runs it wherever winget is on `PATH` (locally and on the GitHub-hosted runner) and skips otherwise.
+A client older than the manifest schema validates under the newest schema it knows and warns that
+the `$schema` header names a newer one; the test tolerates that one warning and no other. The
+structural checks in that test run everywhere.
 
 ## The choices in the installer manifest (RD-32)
 

@@ -1,7 +1,9 @@
 """The winget manifests (S7 file 4, RD-32): the templates and ``tools/release.py winget``.
 
-The rendered set is a valid winget manifest when ``winget validate`` says so; that runs here when
-winget is on ``PATH`` and is skipped on CI (the GitHub-hosted Windows runners do not ship winget).
+The rendered set is a valid winget manifest when ``winget validate`` says so; that runs wherever
+winget is on ``PATH`` (this machine, and the GitHub-hosted runner, whose winget may be older than
+the manifest schema: such a client validates under the newest schema it knows and warns that the
+``$schema`` header names a newer one; that single warning is tolerated, any other fails).
 What runs everywhere: the templates render to YAML with the required keys per manifest type and
 one schema version; the installer manifest agrees with the Inno script (the ProductCode is the
 AppId plus ``_is1``, the OS floor is ``MinVersion``, the publisher is ``AppPublisher``); the locale
@@ -261,7 +263,7 @@ def test_the_cli(installer: Path, tmp_path: Path, capsys: pytest.CaptureFixture[
     assert (release.winget_manifest_dir(tmp_path, VERSION) / NAMES["installer"]).is_file()
 
 
-@pytest.mark.skipif(shutil.which("winget") is None, reason="winget is not on PATH (CI runners)")
+@pytest.mark.skipif(shutil.which("winget") is None, reason="winget is not on PATH")
 def test_winget_validate_accepts_the_rendered_set(installer: Path, tmp_path: Path) -> None:
     folder = release.write_winget(VERSION, installer, tmp_path, DATE)
     winget = shutil.which("winget")
@@ -273,5 +275,12 @@ def test_winget_validate_accepts_the_rendered_set(installer: Path, tmp_path: Pat
         timeout=120,
         check=False,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "succeeded" in result.stdout.lower()
+    output = result.stdout + result.stderr
+    assert "Manifest validation succeeded" in output, output
+    warnings = [line for line in output.splitlines() if line.startswith("Manifest Warning:")]
+    # An older client than the schema checks the $schema header against the newest version it
+    # knows (the GitHub runner, 2026-11); the manifest still validated. Nothing else is tolerated.
+    unexpected = [w for w in warnings if "schema header URL does not match" not in w]
+    assert not unexpected, unexpected
+    if not warnings:
+        assert result.returncode == 0, output
