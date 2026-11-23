@@ -7,7 +7,7 @@ All notable changes to Morphwheel are recorded here. The format follows
 The release workflow turns a version's section into the GitHub Release notes, so a version's
 section exists before its tag, headed `## [x.y.z] - Unreleased` until the release date is set.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-23
 
 The first release: image conversion from File Explorer, with no app window in the flow.
 

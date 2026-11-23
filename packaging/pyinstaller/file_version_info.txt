@@ -22,7 +22,7 @@ VSVersionInfo(
         StringStruct('LegalCopyright', 'Copyright (c) 2026 Morphwheel contributors. MIT License.'),
         StringStruct('OriginalFilename', 'morphwheel.exe'),
         StringStruct('ProductName', 'Morphwheel'),
-        StringStruct('ProductVersion', '0.1.0.dev0')
+        StringStruct('ProductVersion', '0.1.0')
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
