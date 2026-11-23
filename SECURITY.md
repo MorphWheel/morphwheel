@@ -61,7 +61,8 @@ Each rule below is enforced in code and covered by tests; the decision IDs refer
 
 - Every release ships `SHA256SUMS.txt` beside the installer; the release workflow verifies the
   checksums of what it publishes.
-- Code signing through SignPath Foundation is applied for. Until it is approved, releases are
+- Code signing through SignPath Foundation is planned; the application follows the first
+  release, which the Foundation requires. Until it is approved, releases are
   **unsigned**; once it is, the two executables and the installer are signed, and the installer's
   uninstaller stub stays unsigned (a known limitation of the signing step).
 - The release workflow publishes on a tag push only, grants `contents: write` to the publishing job

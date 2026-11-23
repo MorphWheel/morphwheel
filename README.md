@@ -35,8 +35,9 @@ Morphwheel is a free, open-source (MIT) image converter for Windows.
   winget install MorphWheel.Morphwheel
   ```
 
-- **Code signing:** the first releases are unsigned while the application to SignPath Foundation is
-  pending; Windows SmartScreen may warn about an unrecognized app. Verify the checksum instead.
+- **Code signing:** the first releases are unsigned until code signing through SignPath Foundation
+  is approved (the application follows the first release); Windows SmartScreen may warn about an
+  unrecognized app. Verify the checksum instead.
 
 Windows 11 is supported; Windows 10 22H2 is best-effort. 64-bit only.
 
