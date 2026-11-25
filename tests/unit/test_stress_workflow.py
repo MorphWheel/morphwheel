@@ -3,8 +3,9 @@ intermittent access violation with a native dump.
 
 The run itself is proven on GitHub. What a test can hold: it only runs by hand, with read-only
 permissions; the inputs reach the scripts through ``env`` and are never spliced into them; the dump
-settings, the error-mode launcher and the three canaries come before the loop, which runs pytest
-through the launcher; failures are judged by exit code; a run over its time limit is killed with
+settings and the three canaries come before the loop, which runs pytest through the shared
+``tools/wer_launch.py`` (its own tests: ``test_wer_launch.py``); failures are judged by exit code;
+a run over its time limit is killed with
 its tree; the artifact is uploaded even when the loop fails; and the default test list names files
 that exist.
 """
@@ -68,12 +69,11 @@ def test_the_dumps_are_set_up_and_proven_before_the_loop(steps: list[dict[str, A
     assert r'$wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"' in setup
     assert r'$key = "$wer\LocalDumps\python.exe"' in setup
     assert "-Name DumpFolder" in setup
-    assert "SetErrorMode(0)" in setup  # the launcher: an inherited SEM_NOGPFAULTERRORBOX skips WER
-    assert "sys.path[0] = os.getcwd()" in setup  # imports as under `python -m pytest`
-    assert "ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]" in setup  # a real fault
     run = steps[canary]["run"]
+    # the shared launcher, which CI runs its tests through too (tests/unit/test_wer_launch.py)
+    assert '$launcher = Join-Path $env:GITHUB_WORKSPACE "tools\\wer_launch.py"' in run
     assert "ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]" in run  # the inherited-mode canary
-    assert 'string_at(0)"' not in run + setup  # ctypes turns that fault into an OSError on Windows
+    assert 'string_at(0)"' not in run  # ctypes turns that fault into an OSError on Windows
     assert '@($launcher, "--crash")' in run
     assert '@("-X", "faulthandler", $launcher, "--crash")' in run  # the way pytest runs
     assert "Get-Process -Name WerFault" in run  # the dump is complete before it is removed
@@ -83,7 +83,8 @@ def test_the_dumps_are_set_up_and_proven_before_the_loop(steps: list[dict[str, A
 def test_failures_are_counted_by_exit_code(steps: list[dict[str, Any]]) -> None:
     run = steps[_index(steps, "loop")]["run"]
     assert "$p.ExitCode -eq 0" in run
-    assert '$pytest = @($launcher, "pytest",' in run  # every run resets its error mode
+    assert '$pytest = @($launcher, "pytest",' in run  # every run lets a crash reach WER
+    assert '$launcher = Join-Path $env:GITHUB_WORKSPACE "tools\\wer_launch.py"' in run
     assert "access violation" not in run.lower()  # faulthandler prints handled ones too
     assert "PSNativeCommandUseErrorActionPreference" not in run  # one failed run must not stop it
     assert "$env:GITHUB_STEP_SUMMARY" in run
@@ -95,6 +96,7 @@ def test_the_artifact_is_uploaded_whatever_the_loop_did(steps: list[dict[str, An
     assert upload["if"] == "always()"
     assert str(upload["uses"]).startswith("actions/upload-artifact@")
     assert upload["with"]["path"] == "${{ runner.temp }}/stress"
+    assert "${{ github.run_attempt }}" in upload["with"]["name"]  # a re-run uploads its own
     assert upload["with"]["if-no-files-found"] == "ignore"
 
 

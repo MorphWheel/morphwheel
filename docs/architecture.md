@@ -208,13 +208,17 @@ rows C1 to C43 (a different numbering) are in
   timeout, the fixture plugins; the builtin converter over generated images (nothing binary is
   checked in).
 - **Gates** on every push (`.github/workflows/ci.yml`, windows-latest): ruff, ruff format, mypy
-  strict, import-linter, pytest. The same five run locally before every report.
+  strict, import-linter, pytest. The same five run locally before every report. pytest runs through
+  `tools/wer_launch.py`, with Windows Error Reporting set to write a full dump of any crashed
+  `python.exe` on the runner, so a native crash in the tests leaves a dump. The dump is uploaded
+  only when the job fails. A canary crash proves the capture on each run and only warns, and the
+  setup step can never fail the job.
 - **Stress** (`.github/workflows/stress.yml`, by hand only): runs a slice of the suite many times,
-  each run in its own process, with Windows Error Reporting set to write a dump of any crashed
-  `python.exe` on the runner. Every run starts through a launcher that resets the inherited error
-  mode (with `SEM_NOGPFAULTERRORBOX` set, WER never runs), and three canary crashes prove the capture
-  first. Failures are counted by exit code, never by faulthandler's text, which
-  also prints exceptions that Windows handles; a run over its time limit is killed and counted as hung.
+  each run in its own process, with the same dump capture. Every run starts through
+  `tools/wer_launch.py`, which clears `SEM_NOGPFAULTERRORBOX` from the inherited error mode (with
+  that bit set, WER never runs), and three canary crashes prove the capture first. Failures are
+  counted by exit code, never by faulthandler's text, which also prints exceptions that Windows
+  handles; a run over its time limit is killed and counted as hung.
 - **Live drags** are performed by the user with `tools/drag_probe.py` and the checklist; the
   session reads the logs.
 

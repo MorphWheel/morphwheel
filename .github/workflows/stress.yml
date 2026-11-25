@@ -6,12 +6,13 @@
 # so the runner is where it can be caught, and a native dump is what names the object involved.
 # The tracker's open-items table in docs/progress.md has the analysis.
 #
-# The dump settings change only this throwaway runner. Every pytest run goes through a launcher
-# that resets the error mode it inherits (with SEM_NOGPFAULTERRORBOX set, WER never runs and no dump
-# is written: the first dispatch showed exactly that). Three canary crashes prove the capture
-# before the loop: with the inherited mode, through the launcher, and through the launcher with
-# faulthandler on, as pytest runs. If only the faulthandler one leaves no dump, dispatch again with
-# "-p no:faulthandler" added to the tests input. Failures are counted by
+# The dump settings change only this throwaway runner. Every pytest run goes through
+# tools/wer_launch.py, which clears SEM_NOGPFAULTERRORBOX from the error mode it inherits (with that
+# bit set, WER never runs and no dump is written: the first dispatch showed exactly that). CI runs
+# its tests through the same launcher, so a dispatch here also proves CI's capture. Three canary
+# crashes prove the capture before the loop: with the inherited mode, through the launcher, and
+# through the launcher with faulthandler on, as pytest runs. If only the faulthandler one leaves no
+# dump, dispatch again with "-p no:faulthandler" added to the tests input. Failures are counted by
 # exit code, never by "access violation" in the output: faulthandler also prints exceptions that
 # Windows goes on to handle. A run over its time limit is killed with its workers and counted as
 # hung. The artifact (failed runs' logs, full dumps) is public on this repository for 14 days.
@@ -91,35 +92,12 @@ jobs:
             Write-Host "WER policy key: absent"
           }
           Get-Service WerSvc | Format-List Name, Status, StartType
-          # The launcher: a process started with SEM_NOGPFAULTERRORBOX in its error mode (inherited from
-          # its parent) never reaches WER, so no dump is written. It resets the mode, which the test
-          # workers then inherit, and runs a module as `python -m` would.
-          $tools = Join-Path $env:RUNNER_TEMP "stress-tools"
-          New-Item -ItemType Directory -Force -Path $tools | Out-Null
-          @'
-          import ctypes
-          import os
-          import runpy
-          import sys
-
-          previous = ctypes.windll.kernel32.SetErrorMode(0)
-          print(f"wer_launch: inherited error mode {previous:#06x}, now 0", file=sys.stderr, flush=True)
-          if sys.argv[1:] == ["--crash"]:
-              # A plain read of address 1. Not ctypes.string_at(0): ctypes guards its foreign calls on
-              # Windows and turns that fault into an OSError, so the process would not crash.
-              ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]
-          else:
-              module = sys.argv[1]
-              sys.argv = [module, *sys.argv[2:]]
-              sys.path[0] = os.getcwd()  # as `python -m` has it, not this script's folder
-              runpy.run_module(module, run_name="__main__", alter_sys=True)
-          '@ | Set-Content -Path (Join-Path $tools "wer_launch.py") -Encoding utf8
 
       - name: Canary crashes (prove the dump capture)
         shell: pwsh
         run: |
           $dumps = Join-Path (Join-Path $env:RUNNER_TEMP "stress") "dumps"
-          $launcher = Join-Path (Join-Path $env:RUNNER_TEMP "stress-tools") "wer_launch.py"
+          $launcher = Join-Path $env:GITHUB_WORKSPACE "tools\wer_launch.py"
           # The first one keeps the inherited error mode (it showed no dump on the first dispatch);
           # the other two go through the launcher, as the loop does.
           $canaries = @(
@@ -177,7 +155,7 @@ jobs:
             exit 2
           }
           $python = (Get-Command python).Source
-          $launcher = Join-Path (Join-Path $env:RUNNER_TEMP "stress-tools") "wer_launch.py"  # resets the error mode
+          $launcher = Join-Path $env:GITHUB_WORKSPACE "tools\wer_launch.py"  # lets a crash reach WER
           $pytest = @($launcher, "pytest", "-q", "-p", "no:cacheprovider") + ($env:STRESS_TESTS.Trim() -split '\s+')
           $logs = Join-Path (Join-Path $env:RUNNER_TEMP "stress") "logs"
           New-Item -ItemType Directory -Force -Path $logs | Out-Null
@@ -225,7 +203,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: stress-${{ github.run_id }}
+          name: stress-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/stress
           if-no-files-found: ignore
           retention-days: 14

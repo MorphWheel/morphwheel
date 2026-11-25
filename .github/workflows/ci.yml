@@ -54,5 +54,65 @@ jobs:
       - name: Import boundaries
         run: lint-imports
 
+      # A native crash in the tests (an access violation killed one attempt, 2026-11-19) leaves a
+      # dump: WER LocalDumps for python.exe on this throwaway runner, and pytest run through
+      # tools/wer_launch.py, which clears the inherited error-mode bit that keeps WER from running.
+      # The canary proves the capture on this runner and only warns. If this setup step fails, the
+      # tests still run (through the launcher) as before, without dumps; the summary says which.
+      - name: Turn on crash dumps (this runner only)
+        continue-on-error: true
+        timeout-minutes: 3  # a stalled WerFault must not hold the job
+        run: |
+          $dumps = Join-Path $env:RUNNER_TEMP "ci-dumps"
+          New-Item -ItemType Directory -Force -Path $dumps | Out-Null
+          $wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"
+          New-Item -Path $wer -Force | Out-Null
+          New-ItemProperty -Path $wer -Name Disabled -Value 0 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DontShowUI -Value 1 -PropertyType DWord -Force | Out-Null
+          $key = "$wer\LocalDumps\python.exe"
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpFolder -Value $dumps -PropertyType ExpandString -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpType -Value 2 -PropertyType DWord -Force | Out-Null  # full
+          New-ItemProperty -Path $key -Name DumpCount -Value 2 -PropertyType DWord -Force | Out-Null  # full dumps are large
+          try { Set-Service WerSvc -StartupType Manual; Start-Service WerSvc } catch { Write-Host "WerSvc: $_" }
+          # The canary: a real access violation through the launcher, faulthandler on as under pytest.
+          python -X faulthandler tools/wer_launch.py --crash
+          $code = $LASTEXITCODE
+          $found = @()
+          foreach ($i in 1..60) {  # the file appears before WerFault has finished writing it
+            $found = @(Get-ChildItem -Path $dumps -Filter *.dmp -ErrorAction SilentlyContinue)
+            if ($found.Count -gt 0 -and -not (Get-Process -Name WerFault -ErrorAction SilentlyContinue)) { break }
+            Start-Sleep -Seconds 1
+          }
+          foreach ($f in $found) {  # only real crashes go into the artifact
+            try { Remove-Item -LiteralPath $f.FullName -Force } catch { Write-Host "::warning::canary dump $($f.Name) left in place, so an artifact may hold it: $_" }
+          }
+          $line = "Crash dumps: canary exit code $code (a crash is -1073741819), dump: $(if ($found.Count -gt 0) { 'yes' } else { 'no' })"
+          Write-Host $line
+          $line | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          if ($found.Count -eq 0) {
+            Write-Host "::warning::The crash-dump canary left no dump: a crash in the tests would come without one"
+          }
+          exit 0
+
       - name: Tests
-        run: python -m pytest
+        run: python tools/wer_launch.py pytest  # as `python -m pytest`, with crashes reaching WER
+
+      - name: Wait for crash dumps to be written
+        if: failure()
+        run: |
+          foreach ($i in 1..180) {  # a full dump of a pytest process is far larger than the canary's
+            if (-not (Get-Process -Name WerFault -ErrorAction SilentlyContinue)) { break }
+            Start-Sleep -Seconds 1
+          }
+          Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ci-dumps") -Filter *.dmp -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "dump: $($_.Name) ($([int]($_.Length / 1MB)) MB)" }
+
+      - name: Upload crash dumps
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-dumps-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-dumps
+          if-no-files-found: ignore
+          retention-days: 14
