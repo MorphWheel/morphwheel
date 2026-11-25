@@ -3,9 +3,10 @@ intermittent access violation with a native dump.
 
 The run itself is proven on GitHub. What a test can hold: it only runs by hand, with read-only
 permissions; the inputs reach the scripts through ``env`` and are never spliced into them; the dump
-settings and both canaries (plain, and faulthandler on as under pytest) come before the loop;
-failures are judged by exit code; a run over its time limit is killed with its tree; the artifact
-is uploaded even when the loop fails; and the default test list names files that exist.
+settings, the error-mode launcher and the three canaries come before the loop, which runs pytest
+through the launcher; failures are judged by exit code; a run over its time limit is killed with
+its tree; the artifact is uploaded even when the loop fails; and the default test list names files
+that exist.
 """
 
 from __future__ import annotations
@@ -67,17 +68,22 @@ def test_the_dumps_are_set_up_and_proven_before_the_loop(steps: list[dict[str, A
     assert r'$wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"' in setup
     assert r'$key = "$wer\LocalDumps\python.exe"' in setup
     assert "-Name DumpFolder" in setup
+    assert "SetErrorMode(0)" in setup  # the launcher: an inherited SEM_NOGPFAULTERRORBOX skips WER
+    assert "sys.path[0] = os.getcwd()" in setup  # imports as under `python -m pytest`
+    assert "ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]" in setup  # a real fault
     run = steps[canary]["run"]
-    assert "ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]" in run  # a real fault, not an OSError
-    assert 'string_at(0)"' not in run  # ctypes turns that fault into an exception on Windows
+    assert "ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]" in run  # the inherited-mode canary
+    assert 'string_at(0)"' not in run + setup  # ctypes turns that fault into an OSError on Windows
+    assert '@($launcher, "--crash")' in run
+    assert '@("-X", "faulthandler", $launcher, "--crash")' in run  # the way pytest runs
     assert "Get-Process -Name WerFault" in run  # the dump is complete before it is removed
-    assert '@("-X", "faulthandler")' in run  # the capture is proven the way pytest runs
     assert "exit 0" in run  # a missing dump warns; the loop still runs
 
 
 def test_failures_are_counted_by_exit_code(steps: list[dict[str, Any]]) -> None:
     run = steps[_index(steps, "loop")]["run"]
     assert "$p.ExitCode -eq 0" in run
+    assert '$pytest = @($launcher, "pytest",' in run  # every run resets its error mode
     assert "access violation" not in run.lower()  # faulthandler prints handled ones too
     assert "PSNativeCommandUseErrorActionPreference" not in run  # one failed run must not stop it
     assert "$env:GITHUB_STEP_SUMMARY" in run

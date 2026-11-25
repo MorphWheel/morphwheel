@@ -6,9 +6,12 @@
 # so the runner is where it can be caught, and a native dump is what names the object involved.
 # The tracker's open-items table in docs/progress.md has the analysis.
 #
-# The dump settings change only this throwaway runner. Two canary crashes prove the capture before
-# the loop: one plain, one with faulthandler on, as pytest runs. If only the plain one leaves a
-# dump, dispatch again with "-p no:faulthandler" added to the tests input. Failures are counted by
+# The dump settings change only this throwaway runner. Every pytest run goes through a launcher
+# that resets the error mode it inherits (with SEM_NOGPFAULTERRORBOX set, WER never runs and no dump
+# is written: the first dispatch showed exactly that). Three canary crashes prove the capture
+# before the loop: with the inherited mode, through the launcher, and through the launcher with
+# faulthandler on, as pytest runs. If only the faulthandler one leaves no dump, dispatch again with
+# "-p no:faulthandler" added to the tests input. Failures are counted by
 # exit code, never by "access violation" in the output: faulthandler also prints exceptions that
 # Windows goes on to handle. A run over its time limit is killed with its workers and counted as
 # hung. The artifact (failed runs' logs, full dumps) is public on this repository for 14 days.
@@ -79,23 +82,58 @@ jobs:
           New-ItemProperty -Path $key -Name DumpCount -Value 2 -PropertyType DWord -Force | Out-Null  # full dumps are large
           try { Set-Service WerSvc -StartupType Manual; Start-Service WerSvc } catch { Write-Host "WerSvc: $_" }
           Get-ItemProperty -Path $key | Format-List DumpFolder, DumpType, DumpCount
+          # What else could keep WER from writing a dump, printed for the record.
+          $policy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting"
+          if (Test-Path $policy) {
+            Write-Host "WER policy key:"; Get-ItemProperty -Path $policy | Format-List
+            New-ItemProperty -Path $policy -Name Disabled -Value 0 -PropertyType DWord -Force | Out-Null
+          } else {
+            Write-Host "WER policy key: absent"
+          }
+          Get-Service WerSvc | Format-List Name, Status, StartType
+          # The launcher: a process started with SEM_NOGPFAULTERRORBOX in its error mode (inherited from
+          # its parent) never reaches WER, so no dump is written. It resets the mode, which the test
+          # workers then inherit, and runs a module as `python -m` would.
+          $tools = Join-Path $env:RUNNER_TEMP "stress-tools"
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+          @'
+          import ctypes
+          import os
+          import runpy
+          import sys
+
+          previous = ctypes.windll.kernel32.SetErrorMode(0)
+          print(f"wer_launch: inherited error mode {previous:#06x}, now 0", file=sys.stderr, flush=True)
+          if sys.argv[1:] == ["--crash"]:
+              # A plain read of address 1. Not ctypes.string_at(0): ctypes guards its foreign calls on
+              # Windows and turns that fault into an OSError, so the process would not crash.
+              ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]
+          else:
+              module = sys.argv[1]
+              sys.argv = [module, *sys.argv[2:]]
+              sys.path[0] = os.getcwd()  # as `python -m` has it, not this script's folder
+              runpy.run_module(module, run_name="__main__", alter_sys=True)
+          '@ | Set-Content -Path (Join-Path $tools "wer_launch.py") -Encoding utf8
 
       - name: Canary crashes (prove the dump capture)
         shell: pwsh
         run: |
           $dumps = Join-Path (Join-Path $env:RUNNER_TEMP "stress") "dumps"
+          $launcher = Join-Path (Join-Path $env:RUNNER_TEMP "stress-tools") "wer_launch.py"
+          # The first one keeps the inherited error mode (it showed no dump on the first dispatch);
+          # the other two go through the launcher, as the loop does.
           $canaries = @(
-            @{ Name = "plain"; Flags = @() },
-            @{ Name = "faulthandler on"; Flags = @("-X", "faulthandler") }
+            @{ Name = "inherited error mode"; Args = @("-c", "import ctypes; ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]") },
+            @{ Name = "launcher"; Args = @($launcher, "--crash") },
+            @{ Name = "launcher, faulthandler on"; Args = @("-X", "faulthandler", $launcher, "--crash") }
           )
           $lines = @()
           $faulthandlerDump = $false
+          $launcherDump = $false
           foreach ($canary in $canaries) {
-            $flags = $canary.Flags
+            $canaryArgs = $canary.Args
             $before = @(Get-ChildItem -Path $dumps -Filter *.dmp -ErrorAction SilentlyContinue | ForEach-Object FullName)
-            # A plain read of address 1. Not ctypes.string_at(0): ctypes guards its foreign calls on
-            # Windows and turns that fault into an OSError, so the process would not crash.
-            python @flags -c "import ctypes; ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]"
+            python @canaryArgs
             $code = $LASTEXITCODE
             $found = @()
             foreach ($i in 1..60) {  # the file appears before WerFault has finished writing it
@@ -105,7 +143,8 @@ jobs:
               Start-Sleep -Seconds 1
             }
             $dumped = $found.Count -gt 0
-            if ($canary.Name -eq "faulthandler on") { $faulthandlerDump = $dumped }
+            if ($canary.Name -eq "launcher") { $launcherDump = $dumped }
+            if ($canary.Name -eq "launcher, faulthandler on") { $faulthandlerDump = $dumped }
             $lines += "canary ($($canary.Name)): exit code $code (a crash is -1073741819), dump: $(if ($dumped) { 'yes' } else { 'no' })"
             foreach ($f in $found) {  # only real crashes go into the artifact
               try { Remove-Item -LiteralPath $f.FullName -Force } catch { Write-Host "canary dump left in place: $_" }
@@ -113,7 +152,9 @@ jobs:
           }
           $lines | ForEach-Object { Write-Host $_ }
           (@("## Canaries", "") + ($lines | ForEach-Object { "- $_" }) + @("")) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-          if (-not $faulthandlerDump) {
+          if (-not $launcherDump) {
+            Write-Host "::warning::The launcher canary left no dump: dump capture does not work on this runner, so a crash will come without one"
+          } elseif (-not $faulthandlerDump) {
             Write-Host "::warning::The faulthandler canary left no dump: a crash under pytest may come without one. Dispatch again with -p no:faulthandler in the tests input"
           }
           exit 0
@@ -136,7 +177,8 @@ jobs:
             exit 2
           }
           $python = (Get-Command python).Source
-          $pytest = @("-m", "pytest", "-q", "-p", "no:cacheprovider") + ($env:STRESS_TESTS.Trim() -split '\s+')
+          $launcher = Join-Path (Join-Path $env:RUNNER_TEMP "stress-tools") "wer_launch.py"  # resets the error mode
+          $pytest = @($launcher, "pytest", "-q", "-p", "no:cacheprovider") + ($env:STRESS_TESTS.Trim() -split '\s+')
           $logs = Join-Path (Join-Path $env:RUNNER_TEMP "stress") "logs"
           New-Item -ItemType Directory -Force -Path $logs | Out-Null
           $failed = @()
