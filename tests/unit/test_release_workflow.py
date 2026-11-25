@@ -5,8 +5,8 @@ shape that keeps it safe: minimal permissions per job, every third-party action 
 the signing and publishing steps gated on a tag push of this repository, the build chain in the
 order the spec needs, pwsh idioms that actually fail (no ``$GITHUB_*`` in pwsh, Start-Process for
 the windowed exe, no redirections into release files), and the SignPath inputs spelled as the
-action expects (GitHub only warns about an unknown input). ``ci.yml`` is held to the same pin
-rule.
+action expects (GitHub only warns about an unknown input). ``ci.yml`` and ``stress.yml`` are held
+to the same pin rule.
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def test_permissions_are_minimal_per_job(workflow: dict[Any, Any]) -> None:
         assert "timeout-minutes" in job
 
 
-@pytest.mark.parametrize("name", ["release.yml", "ci.yml"])
+@pytest.mark.parametrize("name", ["release.yml", "ci.yml", "stress.yml"])
 def test_every_action_is_pinned_to_a_commit(name: str) -> None:
     text = (WORKFLOWS / name).read_text(encoding="utf-8")
     uses = re.findall(r"^\s*-?\s*uses:\s*(.+)$", text, re.MULTILINE)

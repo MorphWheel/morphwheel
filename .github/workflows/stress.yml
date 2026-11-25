@@ -1,0 +1,189 @@
+# By hand only: run a slice of the test suite many times, each run in its own process, with
+# Windows Error Reporting set to write a dump of any python.exe that crashes.
+#
+# Why: an access violation killed one CI attempt (2026-11-19) on the main thread inside Qt's event
+# loop, during tests/qt/test_plugin_failures.py. It has never reproduced on a developer machine,
+# so the runner is where it can be caught, and a native dump is what names the object involved.
+# The tracker's open-items table in docs/progress.md has the analysis.
+#
+# The dump settings change only this throwaway runner. Two canary crashes prove the capture before
+# the loop: one plain, one with faulthandler on, as pytest runs. If only the plain one leaves a
+# dump, dispatch again with "-p no:faulthandler" added to the tests input. Failures are counted by
+# exit code, never by "access violation" in the output: faulthandler also prints exceptions that
+# Windows goes on to handle. A run over its time limit is killed with its workers and counted as
+# hung. The artifact (failed runs' logs, full dumps) is public on this repository for 14 days.
+name: Stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: "How many pytest runs (1 to 100)"
+        type: string
+        default: "40"
+      run_minutes:
+        description: "Time limit per run, in minutes (1 to 60); a run over it is killed and counted as hung"
+        type: string
+        default: "10"
+      tests:
+        description: "pytest paths and options, space-separated, no quoting (add -p no:faulthandler if the faulthandler canary left no dump)"
+        type: string
+        default: >-
+          tests/integration tests/qt/test_animator.py tests/qt/test_application.py
+          tests/qt/test_controller.py tests/qt/test_dialogs.py tests/qt/test_dispatcher.py
+          tests/qt/test_i18n.py tests/qt/test_icon.py tests/qt/test_modifier_poller.py
+          tests/qt/test_onboarding.py tests/qt/test_plugin_failures.py
+
+permissions:
+  contents: read
+
+jobs:
+  loop:
+    runs-on: windows-latest
+    timeout-minutes: 300
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      # Third-party actions are pinned to a commit SHA, with the release tag in the comment.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,heic]"
+
+      - name: Turn on crash dumps (this runner only)
+        shell: pwsh
+        run: |
+          $dumps = Join-Path (Join-Path $env:RUNNER_TEMP "stress") "dumps"
+          New-Item -ItemType Directory -Force -Path $dumps | Out-Null
+          $wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"
+          New-Item -Path $wer -Force | Out-Null
+          New-ItemProperty -Path $wer -Name Disabled -Value 0 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DontShowUI -Value 1 -PropertyType DWord -Force | Out-Null
+          $key = "$wer\LocalDumps\python.exe"
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpFolder -Value $dumps -PropertyType ExpandString -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpType -Value 2 -PropertyType DWord -Force | Out-Null  # full
+          New-ItemProperty -Path $key -Name DumpCount -Value 2 -PropertyType DWord -Force | Out-Null  # full dumps are large
+          try { Set-Service WerSvc -StartupType Manual; Start-Service WerSvc } catch { Write-Host "WerSvc: $_" }
+          Get-ItemProperty -Path $key | Format-List DumpFolder, DumpType, DumpCount
+
+      - name: Canary crashes (prove the dump capture)
+        shell: pwsh
+        run: |
+          $dumps = Join-Path (Join-Path $env:RUNNER_TEMP "stress") "dumps"
+          $canaries = @(
+            @{ Name = "plain"; Flags = @() },
+            @{ Name = "faulthandler on"; Flags = @("-X", "faulthandler") }
+          )
+          $lines = @()
+          $faulthandlerDump = $false
+          foreach ($canary in $canaries) {
+            $flags = $canary.Flags
+            $before = @(Get-ChildItem -Path $dumps -Filter *.dmp -ErrorAction SilentlyContinue | ForEach-Object FullName)
+            # A plain read of address 1. Not ctypes.string_at(0): ctypes guards its foreign calls on
+            # Windows and turns that fault into an OSError, so the process would not crash.
+            python @flags -c "import ctypes; ctypes.cast(1, ctypes.POINTER(ctypes.c_int))[0]"
+            $code = $LASTEXITCODE
+            $found = @()
+            foreach ($i in 1..60) {  # the file appears before WerFault has finished writing it
+              $found = @(Get-ChildItem -Path $dumps -Filter *.dmp -ErrorAction SilentlyContinue |
+                Where-Object { $before -notcontains $_.FullName })
+              if ($found.Count -gt 0 -and -not (Get-Process -Name WerFault -ErrorAction SilentlyContinue)) { break }
+              Start-Sleep -Seconds 1
+            }
+            $dumped = $found.Count -gt 0
+            if ($canary.Name -eq "faulthandler on") { $faulthandlerDump = $dumped }
+            $lines += "canary ($($canary.Name)): exit code $code (a crash is -1073741819), dump: $(if ($dumped) { 'yes' } else { 'no' })"
+            foreach ($f in $found) {  # only real crashes go into the artifact
+              try { Remove-Item -LiteralPath $f.FullName -Force } catch { Write-Host "canary dump left in place: $_" }
+            }
+          }
+          $lines | ForEach-Object { Write-Host $_ }
+          (@("## Canaries", "") + ($lines | ForEach-Object { "- $_" }) + @("")) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          if (-not $faulthandlerDump) {
+            Write-Host "::warning::The faulthandler canary left no dump: a crash under pytest may come without one. Dispatch again with -p no:faulthandler in the tests input"
+          }
+          exit 0
+
+      - name: Loop
+        shell: pwsh
+        env:
+          STRESS_ITERATIONS: ${{ inputs.iterations }}
+          STRESS_RUN_MINUTES: ${{ inputs.run_minutes }}
+          STRESS_TESTS: ${{ inputs.tests }}
+        run: |
+          $n = 0
+          if (-not [int]::TryParse($env:STRESS_ITERATIONS, [ref]$n) -or $n -lt 1 -or $n -gt 100) {
+            Write-Host "::error::iterations must be a whole number from 1 to 100, not '$env:STRESS_ITERATIONS'"
+            exit 2
+          }
+          $minutes = 0
+          if (-not [int]::TryParse($env:STRESS_RUN_MINUTES, [ref]$minutes) -or $minutes -lt 1 -or $minutes -gt 60) {
+            Write-Host "::error::run_minutes must be a whole number from 1 to 60, not '$env:STRESS_RUN_MINUTES'"
+            exit 2
+          }
+          $python = (Get-Command python).Source
+          $pytest = @("-m", "pytest", "-q", "-p", "no:cacheprovider") + ($env:STRESS_TESTS.Trim() -split '\s+')
+          $logs = Join-Path (Join-Path $env:RUNNER_TEMP "stress") "logs"
+          New-Item -ItemType Directory -Force -Path $logs | Out-Null
+          $failed = @()
+          $hung = @()
+          foreach ($i in 1..$n) {
+            $out = Join-Path $logs ("run-{0:d3}.out.log" -f $i)
+            $err = Join-Path $logs ("run-{0:d3}.err.log" -f $i)
+            $started = Get-Date
+            $p = Start-Process -FilePath $python -ArgumentList $pytest -NoNewWindow -PassThru `
+              -RedirectStandardOutput $out -RedirectStandardError $err
+            $null = $p.Handle  # keeps ExitCode readable once the process has exited
+            $finished = $p.WaitForExit($minutes * 60000)
+            if (-not $finished) {
+              try { $p.Kill($true) } catch { Write-Host "kill: $_" }  # the whole tree; it may have just exited
+              $p.WaitForExit()
+            }
+            $secs = [int]((Get-Date) - $started).TotalSeconds
+            if (-not $finished) {
+              $hung += "run $i hung (killed after $minutes min)"
+              Write-Host ("::error::run {0}/{1}: hung, killed after {2} min, log kept" -f $i, $n, $minutes)
+              Get-Content $out, $err -Tail 40
+            } elseif ($p.ExitCode -eq 0) {
+              try { Remove-Item -LiteralPath $out, $err } catch { Write-Host "log kept (still open): $_" }  # a worker may hold it
+              Write-Host ("run {0}/{1}: passed ({2} s)" -f $i, $n, $secs)
+            } else {
+              $failed += "run $i exit code $($p.ExitCode)"
+              Write-Host ("::error::run {0}/{1}: exit code {2} ({3} s), log kept" -f $i, $n, $p.ExitCode, $secs)
+              Get-Content $out, $err -Tail 40
+            }
+          }
+          $dumps = @(Get-ChildItem -Path (Join-Path (Join-Path $env:RUNNER_TEMP "stress") "dumps") -Filter *.dmp -ErrorAction SilentlyContinue)
+          $summary = @(
+            "## Stress: $($failed.Count) failed and $($hung.Count) hung of $n runs",
+            "",
+            "Tests: ``$($env:STRESS_TESTS.Trim())``, at most $minutes min per run",
+            "",
+            "Dumps: $($dumps.Count)"
+          ) + (($failed + $hung) | ForEach-Object { "- $_" })
+          $summary | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          if ($failed.Count + $hung.Count -gt 0) { exit 1 }
+          exit 0
+
+      - name: Upload the failed runs' logs and dumps
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stress-${{ github.run_id }}
+          path: ${{ runner.temp }}/stress
+          if-no-files-found: ignore
+          retention-days: 14

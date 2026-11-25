@@ -209,6 +209,11 @@ rows C1 to C43 (a different numbering) are in
   checked in).
 - **Gates** on every push (`.github/workflows/ci.yml`, windows-latest): ruff, ruff format, mypy
   strict, import-linter, pytest. The same five run locally before every report.
+- **Stress** (`.github/workflows/stress.yml`, by hand only): runs a slice of the suite many times,
+  each run in its own process, with Windows Error Reporting set to write a dump of any crashed
+  `python.exe` on the runner. Two canary crashes (plain, and with faulthandler on as under pytest)
+  prove the capture first. Failures are counted by exit code, never by faulthandler's text, which
+  also prints exceptions that Windows handles; a run over its time limit is killed and counted as hung.
 - **Live drags** are performed by the user with `tools/drag_probe.py` and the checklist; the
   session reads the logs.
 
