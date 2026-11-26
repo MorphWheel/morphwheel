@@ -117,11 +117,24 @@ still before pressing Shift; that number says nothing about the app.
 ## Scripted run against the app (synthetic, S2)
 
 `tools/wheel_driver.py` reuses the driver's machinery but starts the app itself
-(`python -m morphwheel --debug`) and reads `morphwheel.log`. It drives rows C13–C20; C21 (UAC) and
-C22 (the mouse-button setting) stay by hand.
+(`python -m morphwheel --debug`) and reads `morphwheel.log`. It drives rows C13–C20 and, since
+2026-11-26, C23; C21 (UAC) and C22 (the mouse-button setting) stay by hand.
+
+Since S3 the drops convert for real, so the driver also reads the engine's lines: C13 and C14 check
+the Compress job (`success` or `already_compact`), C19 the WebP job (`2 file(s) -> webp (1 skipped)`,
+`success`). **C23** drops `mw-test-a.png` on JPG (north) and checks the job line, the output line,
+`job … finished: success`, a success toast, and the file itself: new beside the source (not left by
+an earlier run), the logged size, a real JPEG, and the source's sha256 unchanged. JPG sits north, over
+the command bar when the item is in the first row, so the wheel is opened low enough in the item
+list for the JPG point to be inside it, and the run stops with Esc if it isn't. Outputs are left in
+`%TEMP%\morphwheel-dragtest` and listed as `outputs_created` in the results; empty that folder by
+hand after a few runs, or later rows can scroll out of view and stop the run. The checks run offline
+in `tests/qt/test_wheel_driver.py` against the lines the dispatcher and the toast manager really
+write, each with a negative control.
 
 ```bash
 .venv\Scripts\python.exe tools\wheel_driver.py --dry-run
+.venv\Scripts\python.exe tools\wheel_driver.py --rows C23
 .venv\Scripts\python.exe tools\wheel_driver.py
 ```
 

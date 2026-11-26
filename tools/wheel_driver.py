@@ -1,4 +1,4 @@
-"""Scripted drag run against the app itself: rows C13-C20 of the integration checklist.
+"""Scripted drag run against the app itself: rows C13-C20 and C23 of the integration checklist.
 
 A developer diagnostic, not shipped. It reuses ``tools/drag_driver.py`` (input, UI Automation, the
 safety rules) but starts ``python -m morphwheel --debug`` instead of the probe and reads the app's
@@ -7,12 +7,19 @@ own log. Results are **synthetic** (S0-2), and they say nothing about hand timin
 
 The rules of ``drag_driver`` apply unchanged: only its own test files are pressed, every press
 point is verified first, the button is released only over the wheel or the test window's item
-list, and anything unexpected ends the run with Esc.
+list, anything unexpected ends the run with Esc, and nothing is deleted.
+
+Since S3 every drop converts for real, so the run reads the engine's log lines too (``job …``,
+``job … finished``, the toast). Outputs land beside the test files: the run lists the ones it
+created (``outputs_created`` in the results) and leaves them where they are. C23 drops a PNG on
+JPG, which sits north: the wheel is opened low enough in the item list that the JPG point is inside
+the list, and the run stops (Esc) if the wheel came up anywhere else, so a release can never land
+on the command bar or the address bar above it.
 
 Usage (an active desktop session; hands off the mouse and keyboard)::
 
     .venv\\Scripts\\python.exe tools\\wheel_driver.py --dry-run
-    .venv\\Scripts\\python.exe tools\\wheel_driver.py [--rows C13,C17]
+    .venv\\Scripts\\python.exe tools\\wheel_driver.py [--rows C13,C23]
 """
 
 from __future__ import annotations
@@ -24,8 +31,8 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Callable
-from dataclasses import asdict
+from collections.abc import Callable, Iterable
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -62,12 +69,141 @@ SLOTS = {"n": (0, -1), "ne": (1, -1), "e": (1, 0), "s": (0, 1)}  # unit directio
 APP_LINE_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}) (\w+)\s+\S+ (\S+): (.*)$")
 PRESS_RE = re.compile(r"^press at \((-?\d+), (-?\d+)\), allowed=(\w+), chain=(.*)$")
 SHOWN_RE = re.compile(r"center \((-?\d+), (-?\d+)\)")
+# The engine's lines (engine/dispatcher.py) and the toast's (ui/toasts/manager.py), since S3.
+JOB_START_RE = re.compile(r"^job (\w+): (\d+) file\(s\) -> (\S+) \((\d+) skipped\)$")
+JOB_OUT_RE = re.compile(r"^job (\w+): (.+?) -> (.+) \((\d+) bytes, (\d+) ms(, fallback folder)?\)$")
+JOB_FAIL_RE = re.compile(r"^job (\w+): (.+) failed with (\S+): (.*)$")
+JOB_DONE_RE = re.compile(r"^job (\w+) finished: (\w+)$")
+TOAST_RE = re.compile(r"""^toast: (\w+) (['"])(.*)\2$""")
+SLOT_MARGIN = 32.0  # logical px: how far inside the item list the JPG point must stay (C23)
+
+
+@dataclass(frozen=True)
+class JobOutput:
+    """One ``job <id>: <source> -> <output> (<n> bytes, <ms> ms)`` line."""
+
+    job: str
+    source: str
+    output: str
+    size: int
+    ms: int
+    fallback: bool  # written to Downloads\Morphwheel instead of beside the source
+
+
+def job_outputs(lines: Iterable[Line]) -> list[JobOutput]:
+    found = []
+    for line in lines:
+        if line.tag == "OUT" and (m := JOB_OUT_RE.match(line.msg)):
+            found.append(JobOutput(m[1], m[2], m[3], int(m[4]), int(m[5]), m[6] is not None))
+    return found
+
+
+def job_started(lines: Iterable[Line], target: str) -> tuple[str, int, int] | None:
+    """The first job onto ``target``: (job id, file count, skipped count)."""
+    for line in lines:
+        if line.tag == "JOB" and (m := JOB_START_RE.match(line.msg)) and m[3] == target:
+            return m[1], int(m[2]), int(m[4])
+    return None
+
+
+def job_outcome(lines: Iterable[Line], job: str) -> str | None:
+    for line in lines:
+        if line.tag == "DONE" and (m := JOB_DONE_RE.match(line.msg)) and m[1] == job:
+            return m[2]
+    return None
+
+
+def toasts(lines: Iterable[Line]) -> list[tuple[str, str]]:
+    """(kind, title) of every toast shown."""
+    return [(m[1], m[3]) for x in lines if x.tag == "toast" and (m := TOAST_RE.match(x.msg))]
+
+
+def inside(rect: tuple[int, int, int, int], point: tuple[int, int], margin: int = 0) -> bool:
+    left, top, right, bottom = rect
+    x, y = point
+    return left + margin <= x < right - margin and top + margin <= y < bottom - margin
+
+
+def created_outputs(
+    lines: Iterable[Line], folder: Path, before: set[str], sources: Iterable[Path]
+) -> list[Path]:
+    """The files this run's jobs wrote into ``folder``: new names only, never a source."""
+    source_names = {p.name for p in sources}
+    found: list[Path] = []
+    for out in job_outputs(lines):
+        name = out.output
+        if out.fallback or Path(name).name != name or name in before or name in source_names:
+            continue
+        path = folder / name
+        if path.is_file() and path not in found:
+            found.append(path)
+    return found
+
+
+def conversion_checks(
+    lines: list[Line],
+    *,
+    source: str,
+    target: str,
+    pil_format: str,
+    folder: Path,
+    before: set[str],
+) -> tuple[dict[str, bool], JobOutput | None]:
+    """C23's checks on the engine's side: one job, one new file beside the source, the toast.
+
+    ``before`` holds the names that were in ``folder`` before the run, so an output left by an
+    earlier run can't pass for this one.
+    """
+    started = job_started(lines, target)
+    job = started[0] if started else None
+    out = next((o for o in job_outputs(lines) if o.job == job and o.source == source), None)
+    path = folder / out.output if out is not None else None
+    new_beside = (
+        out is not None
+        and path is not None
+        and not out.fallback
+        and Path(out.output).name == out.output
+        and out.output not in before
+        and path.is_file()
+    )
+    real = False
+    if new_beside and path is not None:
+        from PIL import Image  # a dev dependency, as for the test files
+
+        try:
+            with Image.open(path) as image:
+                real = image.format == pil_format
+        except OSError:
+            real = False
+    checks = {
+        f"job: 1 file(s) -> {target} (0 skipped)": started is not None and started[1:] == (1, 0),
+        f"{source} -> a new file beside it": new_beside,
+        "the output's size is the logged size": new_beside
+        and out is not None
+        and path is not None
+        and path.stat().st_size == out.size,
+        f"the output is a real {pil_format}": real,
+        "job finished: success": job is not None and job_outcome(lines, job) == "success",
+        # The kind, not the title: the title is translated (D3a); it stays in the row's log lines.
+        "toast: success": any(kind == "success" for kind, _ in toasts(lines)),
+    }
+    return checks, out
 
 
 def translate(logger: str, msg: str) -> tuple[str, str]:
     """Map an app log line onto the tags ``drag_driver``'s building blocks look for."""
     if m := PRESS_RE.match(msg):
         return "down", f"at {m[1]},{m[2]} source_ok={m[3]} chain={m[4]}"
+    if JOB_DONE_RE.match(msg):
+        return "DONE", msg
+    if JOB_START_RE.match(msg):
+        return "JOB", msg
+    if JOB_OUT_RE.match(msg):
+        return "OUT", msg
+    if JOB_FAIL_RE.match(msg):
+        return "FAIL", msg
+    if msg.startswith("toast: "):
+        return "toast", msg
     if msg.startswith("state pressed -> dragging"):
         return "thresh", msg
     if msg.startswith("state "):
@@ -104,12 +240,15 @@ class WheelRun(Run):
     def __init__(self, dry_run: bool, rows: set[str] | None) -> None:
         super().__init__(dry_run, with_c4=False, rows=rows)
         self.timings: list[dict[str, float]] = []
+        self.before: set[str] = set()  # the test folder's names before the run (C23)
+        self.kept_lines: list[Line] = []  # the app's log, kept when teardown closes it
 
     # ------------------------------------------------------------- the app instead of the probe
     def make_test_files(self) -> None:
         from PIL import Image
 
         TEST_DIR.mkdir(exist_ok=True)
+        self.before = {p.name for p in TEST_DIR.iterdir()}
         for i, name in enumerate((FILE_PNG, FILE_PNG2, FILE_WEBP)):
             path = TEST_DIR / name
             if not path.exists():
@@ -147,8 +286,14 @@ class WheelRun(Run):
         self.plan["app"] = ready.msg
 
     # ------------------------------------------------------------- building blocks
-    def shift_drag(self, items: int, root: int, name: str) -> tuple[int, tuple[int, int]]:
-        """Press, cross the threshold, press Shift. Returns (log mark, wheel centre, physical)."""
+    def shift_drag(
+        self, items: int, root: int, name: str, room_above: float | None = None
+    ) -> tuple[int, tuple[int, int]]:
+        """Press, cross the threshold, press Shift. Returns (log mark, wheel centre, physical).
+
+        With ``room_above`` (logical px), the pointer first moves down inside the item list until
+        that much list lies above it, so the wheel (centred on the pointer) opens there.
+        """
         m, x, y = self.press_item(items, root, name)
         self.inp.glide(x + self.px(16), y)
         if not self.dry and self.wait(m, "thresh", timeout=1.0) is None:
@@ -156,6 +301,12 @@ class WheelRun(Run):
             self.release("list", (x, y))
             raise Stop("the app saw no drag threshold")
         time.sleep(0.15)
+        if room_above is not None:
+            _left, top, _right, bottom = self.list_rect
+            low = min(max(y, top + self.px(room_above)), bottom - self.px(SLOT_MARGIN))
+            if low != y:
+                self.inp.glide(x + self.px(16), low)
+                time.sleep(0.15)
         shift_at = time.time()
         self.inp.key(VK_SHIFT, True)
         show = self.wait(m, "SHOW", timeout=1.5)
@@ -196,6 +347,30 @@ class WheelRun(Run):
         self.wait(m, "hide", timeout=1.5)
         time.sleep(0.5)
 
+    def job_lines(self, m: int, target: str) -> tuple[tuple[str, int, int] | None, str | None]:
+        """Wait for the drop's job and its end. Returns (start, outcome).
+
+        The first job may wait for a worker that is still starting, hence the long timeout.
+        """
+        assert self.log is not None
+        self.wait(m, "JOB", f"-> {target} (", timeout=5.0)
+        started = job_started(self.log.since(m), target)
+        if started is None:
+            return None, None
+        self.wait(m, "DONE", f"job {started[0]} finished", timeout=15.0)
+        return started, job_outcome(self.log.since(m), started[0])
+
+    def stop_probe(self) -> None:
+        """Stop the app, keeping its lines: the results list the outputs after teardown."""
+        if self.log is not None:
+            self.kept_lines = self.log.since(0)
+        super().stop_probe()
+
+    def outputs(self) -> list[Path]:
+        """The files this run's conversions created beside the test files."""
+        lines = self.log.since(0) if self.log is not None else self.kept_lines
+        return created_outputs(lines, TEST_DIR, self.before, self.hashes)
+
     # ------------------------------------------------------------- the rows
     def c13_drop(self, row: str = "C13", name: str = FILE_PNG, slot: str = "s") -> None:
         m, center = self.shift_drag(self.window, self.window, name)
@@ -207,6 +382,7 @@ class WheelRun(Run):
         drop = self.wait(m, "DROP", timeout=1.5)
         self.finish(m)
         latency = self.enter_latency(m)
+        started, outcome = self.job_lines(m, "compress")  # since S3 the drop really compresses
         assert self.log is not None
         self.record(
             row,
@@ -218,9 +394,13 @@ class WheelRun(Run):
                 and "hub=target" in hovered.msg,
                 "DropRequest logged": drop is not None,
                 "wheel hid (hide: dropped)": self.log.find(m, "hide", "dropped") is not None,
+                "job: 1 file(s) -> compress": started is not None and started[1] == 1,
+                "job finished: success or already_compact": outcome
+                in {"success", "already_compact"},
                 "files unchanged (sha256)": self.files_intact(),
             },
             drop=drop.msg if drop else "?",
+            outcome=str(outcome),  # success, or already_compact for a tiny PNG: both fine
             shown_to_enter_ms=str(latency),
         )
 
@@ -353,6 +533,7 @@ class WheelRun(Run):
         self.release("overlay")
         drop = self.wait(m, "DROP", timeout=1.5)
         self.finish(m)
+        started, outcome = self.job_lines(m, "webp")
         assert self.log is not None
         self.record(
             "C19",
@@ -362,6 +543,8 @@ class WheelRun(Run):
                 "hub=target webp": hovered is not None and "hub=target webp" in hovered.msg,
                 "DropRequest: 2 file(s) -> webp": drop is not None
                 and "2 file(s) -> webp" in drop.msg,
+                "job: 2 file(s) -> webp (1 skipped)": started is not None and started[1:] == (2, 1),
+                "job finished: success": outcome == "success",
                 "files unchanged (sha256)": self.files_intact(),
             },
         )
@@ -393,6 +576,53 @@ class WheelRun(Run):
             },
         )
 
+    def c23_convert(self) -> None:
+        """A real conversion: a PNG dropped on JPG (north) makes a JPG beside it (S3)."""
+        m, center = self.shift_drag(
+            self.window, self.window, FILE_PNG, room_above=SLOT_MID_R + SLOT_MARGIN
+        )
+        north = self.slot_point(center, "n")
+        if not self.dry and not (
+            inside(self.list_rect, center) and inside(self.list_rect, north, self.px(8))
+        ):
+            # Off the list, a release that misses the wheel could reach the command bar or the
+            # address bar, where a Shift drop moves the file. Teardown presses Esc first.
+            raise Stop(f"the JPG point {north} isn't inside the item list {self.list_rect}")
+        enter = self.wait_enter(m, nudge=True)
+        hovered = self.hover(m, center, "n")
+        if not self.dry and hovered is None:
+            raise Stop("the app never reported the pointer over JPG")
+        self.release("overlay")
+        drop = self.wait(m, "DROP", timeout=1.5)
+        self.finish(m)
+        self.job_lines(m, "jpeg")
+        self.wait(m, "toast", "toast: success", timeout=3.0)
+        assert self.log is not None
+        checks, out = conversion_checks(
+            self.log.since(m),
+            source=FILE_PNG,
+            target="jpeg",
+            pil_format="JPEG",
+            folder=TEST_DIR,
+            before=self.before,
+        )
+        self.record(
+            "C23",
+            m,
+            {
+                "DragEnter with plan ok": enter is not None and "plan ok" in enter.msg,
+                "hub=target jpeg over JPG": hovered is not None
+                and "hub=target jpeg" in hovered.msg,
+                "DropRequest: 1 file(s) -> jpeg": drop is not None
+                and "1 file(s) -> jpeg" in drop.msg,
+                **checks,
+                "the source unchanged (sha256)": self.files_intact(),
+            },
+            output=out.output if out else "?",
+            bytes=str(out.size) if out else "?",
+            ms=str(out.ms) if out else "?",
+        )
+
     # ------------------------------------------------------------- driver
     def go(self) -> None:
         self.uia = dd.Uia(LOG_DIR / "wheel_driver-helper.err.log")
@@ -406,6 +636,8 @@ class WheelRun(Run):
             for name in (FILE_PNG, FILE_WEBP, FILE_TXT):
                 self.plan[name] = self.uia.call("locate", hwnd=self.window, name=name)
             self.plan["dpr"] = self.dpr
+            hashed = {p.name for p in self.hashes}
+            self.plan["earlier outputs in the test folder"] = sorted(self.before - hashed)
             return
         self.park()
         steps: list[tuple[str, Callable[[], None]]] = [
@@ -417,6 +649,7 @@ class WheelRun(Run):
             ("C17", self.c17_release_over_hub),
             ("C19", self.c19_mixed),
             ("C20", self.c20_unsupported),
+            ("C23", self.c23_convert),
         ]
         for row, step in steps:
             if self.only is not None and row != "C18" and row not in self.only:
@@ -430,7 +663,7 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0] if __doc__ else None)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--rows", help="only these rows, e.g. C13,C17 (C18 always runs first)")
+    parser.add_argument("--rows", help="only these rows, e.g. C13,C23 (C18 always runs first)")
     parser.add_argument("--countdown", type=int, default=10)
     args = parser.parse_args()
 
@@ -463,6 +696,7 @@ def main() -> int:
         raise
     finally:
         run.teardown()
+        created = run.outputs()  # after teardown: from the lines it kept
         stamp = time.strftime("%Y%m%d-%H%M%S")
         out = LOG_DIR / f"wheel_driver-{'dry-' if args.dry_run else ''}{stamp}.json"
         result = {
@@ -475,9 +709,13 @@ def main() -> int:
             "timings": run.timings,
             "files_intact": run.files_intact(),
             "test_files": [str(p) for p in run.hashes],
+            "outputs_created": [str(p) for p in created],  # left in place
         }
         out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
         print(f"results: {out}")
+        if created:
+            names = ", ".join(p.name for p in created)
+            print(f"outputs created, left in {TEST_DIR}: {names}")
         if args.dry_run:
             print(json.dumps(run.plan, indent=2, default=str))
     return 0 if error is None else 1
