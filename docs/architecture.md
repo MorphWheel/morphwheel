@@ -206,6 +206,10 @@ rows C1 to C43 (a different numbering) are in
   manifests, the file operations, the packaging and release tooling, the release documents.
 - **Qt** (`tests/qt/`): offscreen (`QT_QPA_PLATFORM=offscreen`, set by `tests/conftest.py`) with
   `pytest-qt`; the wheel is rendered to a `QImage` and its pixels asserted.
+- **Garbage collection** (RD-38): in every test, cycles are freed on the main thread only.
+  Automatic collection is off for the session, each test ends with a collection, and a collection
+  that starts on another thread fails the test. A QObject the GC frees on a background thread
+  leaves its running timers pointing at freed memory, which crashed CI.
 - **Integration** (`tests/integration/`): real files, real worker processes, a crash, a hang, a
   timeout, the fixture plugins; the builtin converter over generated images (nothing binary is
   checked in).

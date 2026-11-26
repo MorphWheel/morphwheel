@@ -7,10 +7,12 @@ they use :func:`app_paths_tmp`.
 
 from __future__ import annotations
 
+import gc
 import getpass
 import os
 import subprocess
 import sys
+import threading
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -40,6 +42,51 @@ class Clock:
 @pytest.fixture
 def clock() -> Clock:
     return Clock()
+
+
+# ------------------------------------------------------------------ garbage collection
+# Python's cyclic GC runs on whichever thread is allocating when a threshold is crossed: in this
+# suite that can be the engine's supervisor, a sniffer or an install thread. A QObject it frees
+# there dies on the wrong thread, and a running timer of that object stays registered with the
+# main thread's dispatcher, pointing at freed memory ("Timers cannot be stopped from another
+# thread"); the main thread later crashes delivering its tick. That is the CI access violation of
+# progress.md's open item, read from the dumps on 2026-11-26 (a ModifierPoller's 8 ms timer).
+# So the suite collects on the main thread only: automatic collection is off for the session,
+# every test ends with a collection here, and a collection on any other thread fails the test.
+
+off_main_collections: list[str] = []
+
+
+def _note_collection(phase: str, info: dict[str, int]) -> None:
+    thread = threading.current_thread()
+    if phase == "start" and thread is not threading.main_thread():
+        off_main_collections.append(f"generation {info['generation']} on {thread.name}")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_automatic_gc() -> Iterator[None]:
+    gc.disable()
+    gc.callbacks.append(_note_collection)
+    try:
+        yield
+    finally:
+        gc.collect()  # the session fixtures' cycles too, here, before collection is automatic again
+        gc.callbacks.remove(_note_collection)
+        gc.enable()
+
+
+@pytest.fixture(autouse=True)
+def _collect_on_the_main_thread(_no_automatic_gc: None) -> Iterator[None]:
+    """The first autouse fixture, so its teardown runs after every other fixture's: the test's
+    cycles (rigs, windows, timers) are freed here, on the main thread."""
+    yield
+    gc.collect()
+    if off_main_collections:
+        seen = ", ".join(off_main_collections)
+        off_main_collections.clear()
+        pytest.fail(
+            f"the garbage collector ran off the main thread ({seen}); see tests/conftest.py"
+        )
 
 
 @pytest.fixture(autouse=True)

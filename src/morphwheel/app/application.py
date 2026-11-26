@@ -128,12 +128,17 @@ class _EngineJob(QObject):
             result = e
         except Exception as e:  # not the engine's contract: still reported, never a lost thread
             result = engines.EngineInstallError(f"unexpected: {e}", kind="write")
-        if self.abandoned:
-            return
         try:
-            self.done.emit(result)
+            if not self.abandoned:
+                self.done.emit(result)
         except RuntimeError:  # the sender was deleted first (interpreter exit)
-            return
+            pass
+        finally:
+            # An error's traceback holds this frame, so a local still naming the error would
+            # close a cycle (the error, its traceback, this frame, the error) holding this job.
+            # Only the cyclic GC frees a cycle, on whatever thread collects, and a QObject must
+            # die on its own thread (tests/qt/test_gc_policy.py).
+            del result
 
 
 @dataclass(frozen=True)

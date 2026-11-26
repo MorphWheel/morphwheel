@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -152,10 +153,26 @@ class Rig:
     def state(self) -> State:
         return self.controller.machine.state
 
+    def close(self) -> None:
+        """Stop everything that ticks. The rig is a reference cycle (its lambdas hold ``self``),
+        so only the GC frees it: never with the poller's 8 ms timer still registered (see
+        ``tests/conftest.py``)."""
+        self.controller.stop()
+        self.poller.stop()
+
 
 @pytest.fixture
-def rig() -> Rig:
-    return Rig()
+def rig() -> Iterator[Rig]:
+    made = Rig()
+    yield made
+    made.close()
+
+
+@pytest.fixture
+def motion_rig() -> Iterator[Rig]:
+    made = Rig(motion=True)
+    yield made
+    made.close()
 
 
 def open_wheel(rig: Rig) -> None:
@@ -359,8 +376,8 @@ def test_start_reports_missing_raw_input_and_connects_once(
 
 
 # ----------------------------------------------------------------- with animations on (S4)
-def test_with_motion_on_a_drop_flashes_then_fades_and_hides() -> None:
-    rig = Rig(motion=True)
+def test_with_motion_on_a_drop_flashes_then_fades_and_hides(motion_rig: Rig) -> None:
+    rig = motion_rig
     open_wheel(rig)
     rig.sample(20)  # the appear animation is under way
     assert rig.drag("n", "enter")
@@ -378,8 +395,8 @@ def test_with_motion_on_a_drop_flashes_then_fades_and_hides() -> None:
     assert not rig.window.isVisible()
 
 
-def test_with_motion_on_a_release_over_the_hub_fades_then_hides() -> None:
-    rig = Rig(motion=True)
+def test_with_motion_on_a_release_over_the_hub_fades_then_hides(motion_rig: Rig) -> None:
+    rig = motion_rig
     open_wheel(rig)
     rig.sample(20)
     assert rig.drag("hub", "enter")
