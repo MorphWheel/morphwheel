@@ -15,5 +15,6 @@
 | [`testing/integration-checklist.md`](testing/integration-checklist.md) | Manual drag tests (C1–C41) and automated checks | At the end of every sprint |
 | [`plugins.md`](plugins.md) | **Writing a plugin:** a converter in thirty lines, the manifest, the rules, installing and troubleshooting | When writing or installing a plugin |
 | [`signpath.md`](signpath.md) | **Code signing:** SignPath Foundation's conditions checked against the project, the drafted application, the setup after approval | Before applying, and when configuring signing |
+| [`website.md`](website.md) | **The showcase website:** what `site/` holds, previewing it, deploying it to Cloudflare Pages, the GoDaddy DNS record | When changing or deploying the site |
 | [`translations.md`](translations.md) | **Adding a language:** the tool, the call shape, the direction rules | When translating |
 | [`sprints/`](sprints/) | One report per sprint: deliverables, gates, measurements, findings, exit criteria | At each approval stop |
