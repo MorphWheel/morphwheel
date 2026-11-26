@@ -22,11 +22,11 @@
 
 | Phase | Doc | Status |
 |---|---|---|
-| 1: Research | [phase-1-research.md](discovery/phase-1-research.md) | ✅ approved 2026-10-19 |
-| 1b: Spike | [phase-1b-spike-results.md](discovery/phase-1b-spike-results.md) | ✅ approved 2026-10-19 |
-| 2: Concept & MVP | [phase-2-concept.md](discovery/phase-2-concept.md) | ✅ approved 2026-10-19 |
-| 3: UX/UI | [phase-3-ux.md](discovery/phase-3-ux.md) | ✅ approved 2026-10-19 |
-| 4: Architecture | [phase-4-architecture.md](discovery/phase-4-architecture.md) | ✅ approved 2026-10-19: green light for Phase 5 |
+| 1: Research | phase-1-research.md | ✅ approved 2026-10-19 |
+| 1b: Spike | phase-1b-spike-results.md | ✅ approved 2026-10-19 |
+| 2: Concept & MVP | phase-2-concept.md | ✅ approved 2026-10-19 |
+| 3: UX/UI | phase-3-ux.md | ✅ approved 2026-10-19 |
+| 4: Architecture | phase-4-architecture.md | ✅ approved 2026-10-19: green light for Phase 5 |
 
 ## Sprint board
 

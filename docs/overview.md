@@ -1,8 +1,8 @@
 # Morphwheel: overview
 
 > One page with everything you need to know about the app.
-> The **source of truth** is the approved discovery docs in [`discovery/`](discovery/), which are in Hebrew.
-> This page summarizes them and links back. Decisions live in [`decisions.md`](decisions.md).
+> The **source of truth** is the approved planning docs (in Hebrew, kept outside the repository).
+> This page summarizes them. Decisions live in [`decisions.md`](decisions.md).
 
 ## What it is
 
@@ -32,7 +32,7 @@ What sets it apart from existing clones (P1-1):
 | Windows 11 (Windows 10 is best-effort) | |
 | English UI with i18n infrastructure; Hebrew comes next (D3, D3a) | Other languages |
 
-Details: [Phase 2 §3–§4](discovery/phase-2-concept.md).
+Details: Phase 2 §3–§4.
 
 ## How it looks
 
@@ -59,7 +59,7 @@ Details: [Phase 2 §3–§4](discovery/phase-2-concept.md).
   durations come from WinUI. Everything also works with animations off.
 - **No app window in the flow.** Toasts appear in the bottom-right corner.
 
-Details and ASCII wireframes: [Phase 3](discovery/phase-3-ux.md).
+Details and ASCII wireframes: Phase 3.
 
 ## How it is built
 
@@ -75,7 +75,7 @@ There are two kinds of process:
 - **GUI process:** handles input, and returns from a drop in under 5 ms.
 - **Worker processes:** run the conversions. They are the only place plugin code runs.
 
-import-linter enforces these boundaries in CI. Contracts and the traceability table are in [Phase 4](discovery/phase-4-architecture.md).
+import-linter enforces these boundaries in CI. Contracts and the traceability table are in Phase 4.
 
 ## Stack
 

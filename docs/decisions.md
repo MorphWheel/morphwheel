@@ -3,18 +3,18 @@
 Every approved decision, in one place, with a stable ID and a link to where it was argued.
 **A new decision is recorded here before it reaches the code.**
 
-Discovery documents (`discovery/`) are the approved specs. They are written in Hebrew and kept as an archive.
+The approved planning documents (the discovery phases) are written in Hebrew and kept outside the repository.
 
 | ID | Date | Decision | Source |
 |---|---|---|---|
-| **P1-1** | 2026-10-19 | **Positioning (A):** an independent project that stands apart through safety first, a configurable trigger, Python plugins and signed builds. | [Phase 1 §7](discovery/phase-1-research.md#7-החלטות-שאושרו-19102026) |
+| **P1-1** | 2026-10-19 | **Positioning (A):** an independent project that stands apart through safety first, a configurable trigger, Python plugins and signed builds. | Phase 1 §7 |
 | **P1-2** | 2026-10-19 | **PySide6 under the MIT license**, instead of PyQt6 | Phase 1 §7 |
 | **P1-3** | 2026-10-19 | **Shift is the default trigger** and can be changed. CopyAction is always forced. | Phase 1 §7 |
-| **SP-1** | 2026-10-19 | **Detection** uses Raw Input plus polling. No low-level hook, no keyboard hook. | [Spike](discovery/phase-1b-spike-results.md) |
+| **SP-1** | 2026-10-19 | **Detection** uses Raw Input plus polling. No low-level hook, no keyboard hook. | Spike |
 | **SP-2** | 2026-10-19 | **Every drop is forced to Copy** (`force_copy`) | Spike |
 | **SP-3** | 2026-10-19 | **The OLE-clipboard detection path is rejected** | Spike §6 |
 | **SP-4** | 2026-10-19 | **Manual tests 4–6** (desktop source, Ctrl+C then drag, title-bar drag) are deferred to the S0 checklist | Spike |
-| **D1** | 2026-10-19 | **Video and audio (FFmpeg) come in v0.2.** The MVP covers images and PDF. | [Phase 2 §8](discovery/phase-2-concept.md#8-החלטות-שאושרו-19102026) |
+| **D1** | 2026-10-19 | **Video and audio (FFmpeg) come in v0.2.** The MVP covers images and PDF. | Phase 2 §8 |
 | **D2** | 2026-10-19 | **A "Compress" slice.** Its output is `<name> (compressed).<ext>`. | Phase 2 §8 |
 | **D3** | 2026-10-19 | **i18n infrastructure from day one**, shipping in English only | Phase 2 §8 |
 | **D3a** | 2026-10-19 | **The app is English-native. Hebrew is the first language added after launch.** RTL layout must therefore be planned from the start: settings, toasts and dialogs mirror. The wheel does not, so that slot positions stay fixed (U2). | User, during S0 |
@@ -23,14 +23,14 @@ Discovery documents (`discovery/`) are the approved specs. They are written in H
 | **D6** | 2026-10-19 | **The project name is Morphwheel.** The user reconfirmed it during S0. | Phase 2 §8 |
 | **D7** | 2026-10-19 | **Milestones:** M0 Foundation, M1 core, M2 UI, M3 plugins, M4 release | Phase 2 §8 |
 | **D8** | 2026-10-19 | **Selectable trigger keys:** Shift, Ctrl, Ctrl+Shift. No Alt. | Phase 2 §8 |
-| **U1** | 2026-10-19 | **The wheel is sticky, and a catch halo cancels a drop.** Leaving the halo returns to a normal drag. Pressing Shift again reopens the wheel. Esc cancels everything. | [Phase 3 §11](discovery/phase-3-ux.md#11-החלטות-שאושרו-19102026) |
+| **U1** | 2026-10-19 | **The wheel is sticky, and a catch halo cancels a drop.** Leaving the halo returns to a normal drag. Pressing Shift again reopens the wheel. Esc cancels everything. | Phase 3 §11 |
 | **U2** | 2026-10-19 | **8 fixed slots.** The source format is shown disabled. In a mixed drag, files already in the target format are skipped. | Phase 3 §11 |
 | **U3** | 2026-10-19 | **A More slot (NW) opens an outer arc** with up to 6 plugin items | Phase 3 §11 |
 | **U4** | 2026-10-19 | **Size M is the default:** disc diameter 236 logical px. S, M and L are available. | Phase 3 §11 |
 | **U5** | 2026-10-19 | **No blur in the MVP.** The surface is 92% opaque. | Phase 3 §11 |
 | **U6** | 2026-10-19 | **Our own toast**, in the bottom-right corner | Phase 3 §11 |
 | **U7** | 2026-10-19 | **Arming:** a slot can be selected only after the pointer has moved 12 px or more | Phase 3 §11 |
-| **A1** | 2026-10-19 | **Repo:** this folder is the root and keeps its name. GitHub org `morphwheel`. Public from S0. | [Phase 4 §12](discovery/phase-4-architecture.md#12-החלטות-שאושרו-19102026) |
+| **A1** | 2026-10-19 | **Repo:** this folder is the root and keeps its name. GitHub org `morphwheel`. Public from S0. | Phase 4 §12 |
 | **A2** | 2026-10-19 | **Workflow:** files are written one at a time, with a report after each. **Approval stop at the end of every sprint.** | Phase 4 §12 |
 | **A3** | 2026-10-19 | **No dates.** A sprint ends when its exit criteria are met. | Phase 4 §12 |
 | **A4** | 2026-10-19 | **Plugin dependencies:** the standard library, what is bundled, and pure Python. No pip. | Phase 4 §12 |

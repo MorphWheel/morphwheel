@@ -1,7 +1,7 @@
 # Architecture
 
-> The living English summary of the approved blueprint,
-> [phase-4-architecture.md](discovery/phase-4-architecture.md) (Hebrew, archived). Where this page
+> The living English summary of the approved blueprint (phase 4 of the planning, kept outside the
+> repository). Where this page
 > and the code disagree, the code wins and this page is wrong: fix it. Decisions are cited by ID
 > from [decisions.md](decisions.md); the one-page product view is [overview.md](overview.md).
 
@@ -196,7 +196,7 @@ survive (RD-15, RD-21). `paths` is the one place that knows the folders.
 | A plugin is one module or package in its own folder; no shadowing | RD-28 | `plugins/loader.py`, `manifest.py`, `registry.py` | `tests/unit/test_loader.py`, `test_manifest.py`, `test_registry.py` |
 | A crashed, hung, broken or tampering plugin leaves nothing behind | M3 | the pool, the worker, the toasts | `tests/qt/test_plugin_failures.py`: the four fixture plugins through the real app and real workers |
 
-"phase-3 C*n*" are the constraints of [phase-3-ux.md](discovery/phase-3-ux.md); the manual checklist
+"phase-3 C*n*" are the constraints of phase-3-ux.md; the manual checklist
 rows C1 to C43 (a different numbering) are in
 [testing/integration-checklist.md](testing/integration-checklist.md).
 
