@@ -63,6 +63,11 @@ The law is enforced by import-linter (`pyproject.toml`, six contracts, run on ev
 
 - **Nothing heavy on the main thread.** Raw Input arrives there, and Explorer is blocked until our
   drop handler returns, so the drop handler builds a `DropRequest` and nothing else (under 5 ms).
+- **Garbage is collected on the main thread only** (RD-38). Python's automatic collection runs on
+  whichever thread is allocating, and a QObject it frees on a supervisor or the sniffer thread
+  leaves its running timers pointing at freed memory. So `run()` turns it off before any thread
+  starts, and `app/collector.py` collects from a 1 s timer on the main thread, by the same
+  thresholds. The workers keep automatic collection: they never load Qt.
 - **DragEnter does no I/O.** The first plan is by extension. The sniffer thread then reads up to
   64 KB of each local file (the real format, animated or not) within a 50 ms budget and the window
   re-plans; network paths are not sniffed. If the sniff has not finished by the drop, the worker
@@ -209,7 +214,8 @@ rows C1 to C43 (a different numbering) are in
 - **Garbage collection** (RD-38): in every test, cycles are freed on the main thread only.
   Automatic collection is off for the session, each test ends with a collection, and a collection
   that starts on another thread fails the test. A QObject the GC frees on a background thread
-  leaves its running timers pointing at freed memory, which crashed CI.
+  leaves its running timers pointing at freed memory, which crashed CI. The app follows the same
+  rule at run time (§2).
 - **Integration** (`tests/integration/`): real files, real worker processes, a crash, a hang, a
   timeout, the fixture plugins; the builtin converter over generated images (nothing binary is
   checked in).

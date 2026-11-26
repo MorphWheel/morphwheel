@@ -11,6 +11,7 @@ avoid cycles where they can (``_EngineJob``).
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import subprocess
 import sys
@@ -19,9 +20,12 @@ import weakref
 from pathlib import Path
 
 import pytest
+from pytestqt.qtbot import QtBot
 
 import conftest
+from morphwheel.app import collector
 from morphwheel.app.application import _EngineJob
+from morphwheel.app.collector import MainThreadCollector, due_generation
 from morphwheel.engine import engines
 
 pytestmark = pytest.mark.usefixtures("qapp")
@@ -116,3 +120,118 @@ def test_a_failed_heic_install_leaves_no_cycle(tmp_path: Path, fetch: engines.Fe
     del job, error
     results.clear()
     assert gone() is None
+
+
+# ------------------------------------------------------------------ the app's collector (RD-38(e))
+@pytest.mark.parametrize(
+    ("counts", "thresholds", "due"),
+    [
+        ((0, 0, 0), (700, 10, 10), None),
+        ((700, 10, 10), (700, 10, 10), None),  # at a threshold is not past it
+        ((701, 0, 0), (700, 10, 10), 0),
+        ((701, 11, 0), (700, 10, 10), 1),  # the oldest generation past its threshold
+        ((0, 11, 0), (700, 10, 10), 1),
+        ((701, 11, 11), (700, 10, 10), 2),
+        ((5000, 0, 0), (0, 10, 10), None),  # a threshold of 0: never automatically
+        ((0, 0, 11), (700, 10, 0), None),
+    ],
+)
+def test_the_generation_due(
+    counts: tuple[int, int, int], thresholds: tuple[int, int, int], due: int | None
+) -> None:
+    assert due_generation(counts, thresholds) == due
+
+
+def test_the_counts_climb_while_automatic_collection_is_off() -> None:
+    """The collector depends on it: with collection off, allocations still count, and a
+    collection of the generation due resets its count and moves the next one up."""
+    assert not gc.isenabled()
+    gc.collect()
+    assert due_generation(gc.get_count(), gc.get_threshold()) is None  # the control
+    kept = [[] for _ in range(gc.get_threshold()[0] * 2)]
+    assert due_generation(gc.get_count(), gc.get_threshold()) == 0
+    before = gc.get_count()[1]
+    gc.collect(0)
+    assert due_generation(gc.get_count(), gc.get_threshold()) is None
+    assert gc.get_count()[1] == before + 1
+    del kept
+
+
+class _Cycle:
+    def __init__(self) -> None:
+        self.me = self
+
+
+def test_the_collector_frees_a_cycle_on_its_tick(qtbot: QtBot) -> None:
+    cycle = _Cycle()
+    gone = weakref.ref(cycle)
+    del cycle
+    kept = [[] for _ in range(gc.get_threshold()[0] * 2)]  # past generation 0's threshold
+    qtbot.wait(100)
+    assert gone() is not None  # the control: nothing collects while automatic collection is off
+    sweeper = MainThreadCollector(interval_ms=50)
+    sweeper.start()
+    try:
+        qtbot.waitUntil(lambda: gone() is None, timeout=2000)
+    finally:
+        sweeper.stop()
+    del kept
+
+
+def test_stop_collects_and_leaves_automatic_collection_off() -> None:
+    sweeper = MainThreadCollector()
+    sweeper.start()
+    assert sweeper.active
+    cycle = _Cycle()
+    gone = weakref.ref(cycle)
+    del cycle
+    sweeper.stop()
+    assert gone() is None
+    assert not sweeper.active
+    assert not gc.isenabled()
+
+
+def test_the_collector_refuses_to_start_off_the_main_thread() -> None:
+    sweeper = MainThreadCollector()
+    errors: list[BaseException] = []
+
+    def start() -> None:
+        try:
+            sweeper.start()
+        except RuntimeError as e:
+            errors.append(e)
+
+    starter = threading.Thread(target=start, name="mw-test-starter")
+    starter.start()
+    starter.join()
+    assert len(errors) == 1
+    assert not sweeper.active
+
+
+class _Recorder(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+def test_a_tick_turns_automatic_collection_off_again() -> None:
+    """Heard on the module's own logger: ``setup_logging`` stops ``morphwheel`` propagating."""
+    recorder = _Recorder()
+    collector.log.addHandler(recorder)
+    sweeper = MainThreadCollector()
+    try:
+        gc.enable()
+        sweeper.tick()
+        assert not gc.isenabled()
+        gc.enable()
+        sweeper.tick()
+        assert not gc.isenabled()
+    finally:
+        collector.disable_automatic()
+        collector.log.removeHandler(recorder)
+    assert recorder.messages == [  # once per collector
+        "automatic garbage collection was turned on again; turning it off"
+    ]

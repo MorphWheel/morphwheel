@@ -10,6 +10,8 @@ from __future__ import annotations
 import shutil
 import sys
 import threading
+import time
+import weakref
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from functools import partial
@@ -28,6 +30,7 @@ from morphwheel.app.application import (
     EXIT_OK,
     HEIC_TOAST_KEY,
     Application,
+    _EngineJob,
     build_catalog,
     motion_switch,
     parse_args,
@@ -136,6 +139,42 @@ def test_builds_offscreen_and_logs_to_the_app_paths(
     assert "fallback output:" in text
     assert app.paths.fallback_output_dir == app_paths_tmp.fallback_output_dir
     assert app.paths.fallback_output_dir.name == "Morphwheel"
+
+
+def test_the_main_thread_collects_while_the_app_runs(app: Application) -> None:
+    """RD-38: the collector's timer runs between start and stop, started before the pool."""
+    started: list[bool] = []
+    original = app.pool.start
+    app.pool.start = lambda: (started.append(app.collector.active), original())[1]  # type: ignore[method-assign]
+    assert not app.collector.active
+    app.start()
+    assert started == [True]  # running before the pool's threads exist
+    app.stop()
+    assert not app.collector.active
+
+
+def test_run_turns_automatic_collection_off_before_the_app_exists(
+    instance_names: tuple[str, str], monkeypatch: pytest.MonkeyPatch, app_paths_tmp: AppPaths
+) -> None:
+    """In the suite collection is already off, so the order is what's asserted."""
+    order: list[str] = []
+
+    class Built:
+        def __init__(self, *a: object, **k: object) -> None:
+            order.append("app")
+
+        def exec(self) -> int:
+            return EXIT_OK
+
+    mutex, pipe = instance_names
+    monkeypatch.setattr(application_module, "SingleInstance", partial(SingleInstance, mutex, pipe))
+    monkeypatch.setattr(application_module, "app_paths", lambda: app_paths_tmp)
+    monkeypatch.setattr(application_module, "Application", Built)
+    monkeypatch.setattr(
+        application_module.collector, "disable_automatic", lambda: order.append("disable")
+    )
+    assert application_module.run(["morphwheel"]) == EXIT_OK
+    assert order == ["disable", "app"]
 
 
 @pytest.mark.integration
@@ -754,9 +793,46 @@ def test_a_download_in_flight_at_stop_finishes_quietly(
     assert app._engine_job is None
     done: list[object] = []
     job.done.connect(done.append)
+    freed_on: list[str] = []
+    weakref.finalize(job, lambda: freed_on.append(threading.current_thread().name))
+    assert job in application_module._RETIRED_JOBS  # RD-38: its thread mustn't hold the last ref
+    thread = job._thread
+    assert thread is not None
+    del job
     gate.set()
+    thread.join(5)
     qtbot.wait(300)
     assert done == []  # nothing arrives at a stopped app, and nothing raised in the thread
+    assert freed_on == []  # the thread ended without freeing it
+    application_module._RETIRED_JOBS.clear()  # here, on the main thread
+    assert freed_on == ["MainThread"]
+
+
+def test_the_install_job_dies_on_the_main_thread_when_its_thread_lingers(
+    make_app: MakeApp, monkeypatch: pytest.MonkeyPatch, qtbot: QtBot
+) -> None:
+    """RD-38: the job's thread holds it too. One still returning when ``done`` is handled would
+    free the QObject there, unless the app waits for it (seen in a probe: 5 of 5 without)."""
+    run = _EngineJob._run
+
+    def lingering(self: _EngineJob) -> None:
+        run(self)
+        time.sleep(0.2)  # ``done`` is out; the thread still holds the job
+
+    monkeypatch.setattr(_EngineJob, "_run", lingering)
+    _no_venv_engine(monkeypatch)
+    data = fake_wheel()
+    pin(monkeypatch, data)  # a success: a failure's traceback would hold the job's frame
+    app = make_app(engine_fetch=lambda url: data)
+    app._install_heic()
+    job = app._engine_job
+    assert job is not None
+    freed_on: list[str] = []
+    weakref.finalize(job, lambda: freed_on.append(threading.current_thread().name))
+    del job
+    qtbot.waitUntil(lambda: app._engine_job is None, timeout=5000)
+    assert freed_on == ["MainThread"]
+    assert application_module._RETIRED_JOBS == []
 
 
 @pytest.mark.integration

@@ -16,6 +16,9 @@ Rules:
 - **The pool is warmed in ``start`` and shut down in ``stop``**, before the ``QApplication`` goes
   away, so no pool thread emits into a dead object.
 - **The drop handler stays light:** ``drop_received`` is a queued signal; ``submit`` does no I/O.
+- **Garbage is collected on the main thread only** (RD-38, ``app.collector``): ``run`` turns
+  automatic collection off before the ``Application`` and its threads exist, and ``start`` starts
+  the collector's timer.
 - Exit codes: 0 normal; ``EXIT_ELEVATED`` when the app refused to run elevated; ``EXIT_FAILED``
   for a failed maintenance command.
 
@@ -43,6 +46,7 @@ from PySide6.QtGui import QGuiApplication, QScreen
 from PySide6.QtWidgets import QApplication
 
 from morphwheel import __version__, i18n
+from morphwheel.app import collector
 from morphwheel.app.controller import Controller
 from morphwheel.core.catalog import Catalog, Target
 from morphwheel.core.formats import FormatId
@@ -101,12 +105,18 @@ REPOSITORY_URL = "https://github.com/MorphWheel/morphwheel"
 HEIC_TOAST_KEY = "engine:heic"
 
 
+RETIRE_JOIN_S = 1.0  # the thread has emitted ``done`` and is returning: microseconds in practice
+
+
 class _EngineJob(QObject):
     """One HEIC install, run on a plain thread so the GUI never waits on the network (A6).
 
     The app keeps a reference until ``done`` has been handled: a job held only by its thread is
     freed when the thread ends, and a freed sender's queued signal never arrives. ``abandoned``
     is set at ``stop()``: the thread then finishes quietly, and never raises on a dead signal.
+
+    Its thread holds the job too, and a QObject must die on its own thread (RD-38), so the app
+    lets go through ``retire``: never while the thread still runs.
     """
 
     done = Signal(object)  # the engine folder (Path), or the exception
@@ -115,10 +125,24 @@ class _EngineJob(QObject):
         super().__init__()
         self._engines_dir = engines_dir
         self._fetch = fetch
+        self._thread: threading.Thread | None = None
         self.abandoned = False
 
     def start(self) -> None:
-        threading.Thread(target=self._run, name="mw-heic-install", daemon=True).start()
+        self._thread = threading.Thread(target=self._run, name="mw-heic-install", daemon=True)
+        self._thread.start()
+
+    def retire(self, *, wait: bool) -> None:
+        """The app is letting go of this job. After ``done`` the thread is only returning, so
+        ``wait`` joins it (briefly): its reference is gone first and the app's is the last, on
+        the main thread. A thread still running (an install abandoned at ``stop()``, or one that
+        didn't end in time) leaves the job in ``_RETIRED_JOBS``, for the life of the process."""
+        if self._thread is None:
+            return
+        if wait:
+            self._thread.join(RETIRE_JOIN_S)
+        if self._thread.is_alive():
+            _RETIRED_JOBS.append(self)
 
     def _run(self) -> None:
         result: Path | engines.EngineInstallError
@@ -139,6 +163,9 @@ class _EngineJob(QObject):
             # Only the cyclic GC frees a cycle, on whatever thread collects, and a QObject must
             # die on its own thread (tests/qt/test_gc_policy.py).
             del result
+
+
+_RETIRED_JOBS: list[_EngineJob] = []  # jobs whose thread outlived the app's reference (retire)
 
 
 @dataclass(frozen=True)
@@ -266,6 +293,7 @@ class Application:
         self._engine_job: _EngineJob | None = None  # the one install that may run at a time
         self._heic_offered = False  # the offer toast, once per run (A6)
         self.settings_window: SettingsWindow | None = None  # built on first use
+        self.collector = collector.MainThreadCollector()  # RD-38: the main thread collects
 
         motion = motion_switch(self.args.motion)
         # The language (D3, D3a): the catalog and the layout direction, before any widget or
@@ -333,6 +361,7 @@ class Application:
         return EXIT_ELEVATED
 
     def start(self) -> None:
+        self.collector.start()  # before the pool's threads: none of them may collect
         self.pool.start()  # warm the workers while the user is still reaching for a file
         self.controller.start()
         self.tray.show()
@@ -345,6 +374,7 @@ class Application:
             self._instance.release()
         if self._engine_job is not None:
             self._engine_job.abandoned = True  # a download in flight finishes quietly
+            self._engine_job.retire(wait=False)  # never waits on the network at quit
             self._engine_job = None
         if self.settings_window is not None:
             self.settings_window.hide()  # flushes a pending slider save
@@ -353,6 +383,7 @@ class Application:
         self.toasts.dismiss_all()
         self.pool.shutdown()
         self._language.remove(self.qapp)  # the tests' application outlives this one
+        self.collector.stop()  # a last collection, on this thread; automatic collection stays off
 
     def exec(self) -> int:
         code = self.startup_checks()
@@ -582,7 +613,10 @@ class Application:
         job.start()
 
     def _on_heic_done(self, result: object) -> None:
-        self._engine_job = None
+        job, self._engine_job = self._engine_job, None
+        if job is not None:
+            job.retire(wait=True)
+        del job  # the last reference, here on the main thread (RD-38)
         if isinstance(result, Path):
             self._refresh_catalog()
             self.toasts.show(heic_installed_toast(), key=HEIC_TOAST_KEY)
@@ -684,6 +718,7 @@ def run(argv: list[str]) -> int:
     if args.install_heic:
         setup_logging(paths.logs_dir, console=True)
         return install_heic(paths)
+    collector.disable_automatic()  # RD-38: before any thread starts, for the rest of the process
     instance: SingleInstance | None = None
     if not args.worker_check:  # one instance per session; the maintenance modes need none
         instance = SingleInstance()
