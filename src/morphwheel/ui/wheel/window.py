@@ -62,7 +62,7 @@ from PySide6.QtWidgets import QWidget
 
 from morphwheel.core.catalog import MORE_ARC_MAX, Catalog, Reason, SlotPos, WheelPlan
 from morphwheel.core.formats import FileInfo
-from morphwheel.core.geometry import Point, Rect, RegionKind, WheelGeometry
+from morphwheel.core.geometry import SIZE_SCALES, Point, Rect, RegionKind, WheelGeometry
 from morphwheel.core.gesture import HideReason
 from morphwheel.core.jobs import DropRequest
 from morphwheel.core.wheel_session import Accept, HubInfo, HubKind, SessionView, WheelSession
@@ -71,12 +71,15 @@ from morphwheel.settings.model import WheelSize
 from morphwheel.ui.theme import Scheme, Theme, current_theme
 from morphwheel.ui.wheel.animator import WheelAnimator
 from morphwheel.ui.wheel.drop_guard import assert_safe, force_copy, reject
+from morphwheel.ui.wheel.glyphs import Glyph, GlyphSet
 from morphwheel.ui.wheel.renderer import (
     Content,
     Frame,
     HubText,
     WheelRenderer,
+    item_glyphs,
     item_labels,
+    slot_glyphs,
     slot_labels,
 )
 from morphwheel.ui.wheel.sniffer import Sniffer
@@ -113,11 +116,14 @@ class WheelWindow(QWidget):
         high_contrast: Callable[[], bool] = lambda: False,
         scheme: Scheme | None = None,
         real_time: bool = True,
+        glyphs: GlyphSet | None = None,
     ) -> None:
         """``motion_enabled`` and ``high_contrast`` are the Windows switches, read at each show
         (``app`` passes ``platform.system``'s; this package imports no Win32). ``scheme`` pins Light
         or Dark (tests); ``None`` follows the platform; High Contrast wins over both. ``real_time=
-        False`` turns off the frame timer and the fade backstop, so tests drive ``animate()``."""
+        False`` turns off the frame timer and the fade backstop, so tests drive ``animate()``.
+        The icons (``glyphs``) are loaded here, at every wheel size and every screen's pixel
+        ratio, so no drag pays for loading Qt's SVG plugin inside Explorer's DragEnter (RD-36)."""
         super().__init__(None, _WINDOW_FLAGS)
         self._catalog = catalog
         self._clock = clock
@@ -136,7 +142,11 @@ class WheelWindow(QWidget):
         self._high_contrast = high_contrast
         self._fixed_scheme = scheme
         self._theme = self._build_theme()
-        self._renderer = WheelRenderer()
+        self._glyphs = glyphs if glyphs is not None else GlyphSet()
+        ratios = sorted({s.devicePixelRatio() for s in QGuiApplication.screens()} or {1.0})
+        took = sum(self._glyphs.warm(dpr, SIZE_SCALES.values()) for dpr in ratios)
+        log.debug("wheel icons loaded in %.1f ms (pixel ratios %s)", took, ratios)
+        self._renderer = WheelRenderer(self._glyphs)
         self._animator = WheelAnimator(motion_enabled, clock, real_time=real_time, parent=self)
         self._animator.frame_ready.connect(self.update)
         self._animator.finished.connect(self._on_fade_finished)
@@ -185,7 +195,14 @@ class WheelWindow(QWidget):
         view = self._view
         plan = view.plan if view is not None else None
         hub = self._hub_text(view.hub) if view is not None else HubText()
-        return Content(view, hub, slot_labels(plan, self.tr("More")), item_labels(plan))
+        return Content(
+            view,
+            hub,
+            slot_labels(plan, self.tr("More")),
+            item_labels(plan),
+            slot_glyphs(plan),
+            item_glyphs(plan),
+        )
 
     def drop_files(self) -> tuple[FileInfo, ...]:
         """The local files of the current drag, as last planned (sniffed when the sniff landed)."""
@@ -465,7 +482,7 @@ class WheelWindow(QWidget):
         if kind is HubKind.MORE:
             return HubText(self.tr("More"))
         if kind is HubKind.CANCEL:
-            return HubText(self.tr("✕ Cancel"))
+            return HubText(self.tr("Cancel"), glyph=Glyph.CANCEL)
         if kind is HubKind.NOT_SUPPORTED:
             return HubText(self.tr("⊘ Not supported"), self._reason_text(hub.reason))
         return HubText()

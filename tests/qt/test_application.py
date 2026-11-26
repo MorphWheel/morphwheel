@@ -24,6 +24,7 @@ from pytestqt.qtbot import QtBot
 import morphwheel.app.application as application_module
 from morphwheel.app.application import (
     EXIT_ELEVATED,
+    EXIT_FAILED,
     EXIT_OK,
     HEIC_TOAST_KEY,
     Application,
@@ -52,6 +53,7 @@ from fake_heic import fake_wheel, pin
 
 from conftest import teardown_app
 from morphwheel.ui.tray import TrayState
+from morphwheel.ui.wheel.glyphs import GlyphSet
 
 pytestmark = pytest.mark.usefixtures("qapp")
 
@@ -766,6 +768,17 @@ def test_worker_check_reports_qt_free_workers(
     assert "qt_loaded=False" in out
     assert out.strip().endswith("worker check: OK")
     assert sys.executable.lower() in out.lower()  # from source: python itself runs the workers
+    assert "wheel icons: OK" in out
+
+
+@pytest.mark.integration
+def test_worker_check_fails_when_a_wheel_icon_does_not_load(
+    app: Application, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    assert app.worker_check(GlyphSet(tmp_path)) == EXIT_FAILED  # an empty folder: none load
+    out = capsys.readouterr().out
+    assert "wheel icons: FAILED (COMPRESS, PDF, MORE, CANCEL)" in out
+    assert out.strip().endswith("worker check: FAILED (wheel icons)")
 
 
 @pytest.mark.parametrize(

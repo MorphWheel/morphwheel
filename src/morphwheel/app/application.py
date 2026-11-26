@@ -23,7 +23,8 @@ Usage::
 
     morphwheel [--any-source] [--debug]
     morphwheel --install-heic        # download the opt-in HEIC engine (A6) and exit
-    morphwheel --worker-check        # start the workers, report their executable and Qt state
+    morphwheel --worker-check        # start the workers, report their executable and Qt state,
+                                     # and whether the wheel icons load (the frozen smoke test)
 """
 
 from __future__ import annotations
@@ -87,6 +88,7 @@ from morphwheel.ui.toasts.model import (
     working_toast,
 )
 from morphwheel.ui.tray import TrayIcon
+from morphwheel.ui.wheel.glyphs import GlyphSet
 from morphwheel.ui.wheel.window import WheelWindow
 
 log = logging.getLogger("morphwheel.app")
@@ -628,8 +630,10 @@ class Application:
         self._details.show_text(text)
 
     # ----------------------------------------------------------------- maintenance commands
-    def worker_check(self) -> int:
-        """A5a: start the pool, report each worker, exit non-zero if any loaded Qt."""
+    def worker_check(self, glyphs: GlyphSet | None = None) -> int:
+        """A5a: start the pool, report each worker, exit non-zero if any loaded Qt. The frozen
+        build's smoke test, so it also loads the wheel's icons, which need Qt's SVG plugin and the
+        bundled files, and fails if one doesn't load (RD-36)."""
         self.pool.start()
         try:
             infos = self.pool.wait_ready()
@@ -643,9 +647,15 @@ class Application:
             )
             log.info(line)
             print(line)
+        broken = (glyphs if glyphs is not None else GlyphSet()).failures()
+        icons = "OK" if not broken else "FAILED (" + ", ".join(broken) + ")"
+        log.info("wheel icons: %s", icons)
+        print(f"wheel icons: {icons}")
         verdict = "OK" if ok else f"FAILED ({len(infos)} of {self.pool.size} ready)"
+        if ok and broken:
+            verdict = "FAILED (wheel icons)"
         print(f"worker check: {verdict}")
-        return EXIT_OK if ok else EXIT_FAILED
+        return EXIT_OK if ok and not broken else EXIT_FAILED
 
 
 def install_heic(paths: AppPaths) -> int:

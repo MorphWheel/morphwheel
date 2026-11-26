@@ -19,7 +19,11 @@ Rules:
   never leave it stale. The layer is regenerated whenever any input differs (compared by value),
   into the same buffer while the size and the pixel ratio hold.
 - Strings arrive ready-made in ``Content`` (labels, the hub's two lines). The renderer translates
-  nothing (D3); ``slot_labels`` and ``item_labels`` are the one place that maps a plan to labels.
+  nothing (D3); ``slot_labels`` and ``item_labels`` are the one place that maps a plan to labels,
+  and ``slot_glyphs`` and ``item_glyphs`` the one place that maps it to icons.
+- Icons (phase-3 §7, RD-36) sit above their label, in the label's color and fade, and are drawn
+  only with a ``GlyphSet`` (the window's, loaded before any drag). Without one, or if an icon won't
+  load, the label is drawn alone, where it always was.
 - High Contrast (C7): opaque fills, 2 px borders in the system's text color, no shadow.
 - Hover is shown three ways (phase-3 §7, color blindness): the accent fill, the 4 px bulge, and the
   hub's text (the window supplies the latter).
@@ -45,6 +49,7 @@ from morphwheel.core.geometry import (
 )
 from morphwheel.core.wheel_session import HubKind, SessionView
 from morphwheel.ui.theme import Theme
+from morphwheel.ui.wheel.glyphs import GLYPH_PX, Glyph, GlyphSet, glyph_for
 
 FLOOR = QColor(0, 0, 0, 1)  # the alpha floor: invisible, catches drops (C2)
 BULGE_PX = 4.0  # the hovered slot stands this much proud (phase-3 §3)
@@ -53,12 +58,14 @@ SHADOW_OFFSET_PX = 4.0
 SHADOW_RINGS = 24
 SKELETON_BAR = (30.0, 6.0)  # the label placeholder while the plan is unknown
 HUB_PADDING = 6.0
+GLYPH_GAP = 1.0  # between an icon and its label, logical px at size M
 
 
 @dataclass(frozen=True)
 class HubText:
     top: str = ""
     bottom: str = ""
+    glyph: Glyph | None = None  # drawn above the top line (Cancel)
 
 
 @dataclass(frozen=True)
@@ -69,6 +76,8 @@ class Content:
     hub: HubText = HubText()
     labels: Mapping[SlotPos, str] = field(default_factory=dict)
     item_labels: tuple[str, ...] = ()
+    glyphs: Mapping[SlotPos, Glyph] = field(default_factory=dict)
+    item_glyphs: tuple[Glyph | None, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -117,6 +126,24 @@ def item_labels(plan: WheelPlan | None) -> tuple[str, ...]:
     return tuple(s.target.label if s.target is not None else "" for s in plan.more)
 
 
+def slot_glyphs(plan: WheelPlan | None) -> dict[SlotPos, Glyph]:
+    """The slots whose label carries an icon: More (as ``slot_labels`` labels it), Compress, PDF."""
+    if plan is None:
+        return {}
+    out: dict[SlotPos, Glyph] = {}
+    for slot in SLOT_ORDER:
+        glyph = Glyph.MORE if slot is MORE_SLOT else glyph_for(plan.slots[slot].target)
+        if glyph is not None:
+            out[slot] = glyph
+    return out
+
+
+def item_glyphs(plan: WheelPlan | None) -> tuple[Glyph | None, ...]:
+    if plan is None:
+        return ()
+    return tuple(glyph_for(s.target) for s in plan.more)
+
+
 def blank_layer(size: QSize, dpr: float) -> QImage:
     """A transparent, premultiplied image at physical resolution, in logical coordinates."""
     image = QImage(
@@ -130,7 +157,8 @@ def blank_layer(size: QSize, dpr: float) -> QImage:
 
 
 class WheelRenderer:
-    def __init__(self) -> None:
+    def __init__(self, glyphs: GlyphSet | None = None) -> None:
+        self._glyphs = glyphs  # None: labels only (and every icon-free test)
         self._layer: QImage | None = None
         self._layer_key: tuple[object, ...] | None = None
         self._shadow: QImage | None = None
@@ -298,13 +326,7 @@ class WheelRenderer:
                     color = pal.text_disabled
                 color = _mix(color, pal.text_on_accent, lit)
                 color.setAlphaF(color.alphaF() * frame.labels)
-                p.setPen(color)
-                width = max(metrics.horizontalAdvance(label), 1.0) + 8
-                p.drawText(
-                    QRectF(at.x() - width / 2, at.y() - 10, width, 20),
-                    Qt.AlignmentFlag.AlignCenter,
-                    label,
-                )
+                self._draw_label(p, at, g, metrics, label, content.glyphs.get(slot), color)
 
     # ----------------------------------------------------------------- the More arc (U3)
     def _paint_more(
@@ -344,13 +366,34 @@ class WheelRenderer:
             color = _mix(pal.text if enabled else pal.text_disabled, pal.text_on_accent, lit)
             color.setAlphaF(color.alphaF() * (frame.more_arc - 0.5) * 2.0)
             mid = polar(angle, (g.more_inner_r + outer) / 2)
-            width = max(metrics.horizontalAdvance(label), 1.0) + 8
-            p.setPen(color)
-            p.drawText(
-                QRectF(c.x() + mid.x - width / 2, c.y() + mid.y - 10, width, 20),
-                Qt.AlignmentFlag.AlignCenter,
-                label,
+            glyph = content.item_glyphs[index] if index < len(content.item_glyphs) else None
+            self._draw_label(
+                p, QPointF(c.x() + mid.x, c.y() + mid.y), g, metrics, label, glyph, color
             )
+
+    def _draw_label(
+        self,
+        p: QPainter,
+        at: QPointF,
+        g: WheelGeometry,
+        metrics: QFontMetricsF,
+        label: str,
+        glyph: Glyph | None,
+        color: QColor,
+    ) -> None:
+        """A label centered on ``at``; with an icon, the icon above and the pair centered."""
+        y = at.y()
+        if glyph is not None and self._glyphs is not None:
+            size = GLYPH_PX * g.scale
+            half = (size + GLYPH_GAP * g.scale) / 2  # the label's center drops by this much
+            icon_at = QPointF(at.x(), y - half - metrics.height() / 2 + size / 2)
+            if self._glyphs.draw(p, glyph, icon_at, size, color):
+                y += half
+        width = max(metrics.horizontalAdvance(label), 1.0) + 8
+        p.setPen(color)
+        p.drawText(
+            QRectF(at.x() - width / 2, y - 10, width, 20), Qt.AlignmentFlag.AlignCenter, label
+        )
 
     # ----------------------------------------------------------------- the hub (C5)
     def _paint_hub(
@@ -379,9 +422,19 @@ class WheelRenderer:
         bottom = bottom_metrics.elidedText(content.hub.bottom, Qt.TextElideMode.ElideMiddle, width)
         top_h = top_metrics.height()
         bottom_h = bottom_metrics.height() if bottom else 0.0
-        y = c.y() - (top_h + bottom_h) / 2
+        glyph_h = 0.0
+        if content.hub.glyph is not None and self._glyphs is not None:
+            glyph_h = (GLYPH_PX + GLYPH_GAP) * g.scale
+        y = c.y() - (glyph_h + top_h + bottom_h) / 2
+        color = pal.text_disabled if dimmed else pal.text
+        if glyph_h and content.hub.glyph is not None and self._glyphs is not None:
+            size = GLYPH_PX * g.scale
+            if self._glyphs.draw(p, content.hub.glyph, QPointF(c.x(), y + size / 2), size, color):
+                y += glyph_h
+            else:
+                y += glyph_h / 2  # the icon didn't load: the text alone, centered again
         p.setFont(top_font)
-        p.setPen(pal.text_disabled if dimmed else pal.text)
+        p.setPen(color)
         p.drawText(QRectF(c.x() - width / 2, y, width, top_h), Qt.AlignmentFlag.AlignCenter, top)
         if bottom:
             p.setFont(bottom_font)

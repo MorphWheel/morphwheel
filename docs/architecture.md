@@ -139,7 +139,9 @@ app, Pillow or Python (RD-28).
 
 **`ui`**: `WheelWindow` is pre-created, translucent, never focused, the only window shown during a
 drag and the only drop target; every DragEnter goes through `drop_guard.force_copy` (phase-1 §3.3);
-`renderer` paints from the theme's tokens over an alpha-1 floor, `animator` runs the appear, fade and
+`renderer` paints from the theme's tokens over an alpha-1 floor (with `glyphs`, the four Fluent icons
+above the Compress, PDF and More labels and the hub's Cancel, loaded when the window is built, RD-36),
+`animator` runs the appear, fade and
 shrink and ends every fade in `hide()`, `sniffer` is the thread above. Toasts (`toasts/`) never take
 focus and stack bottom-right of the drop's screen. The tray, the settings window, the onboarding and
 the dialogs are ordinary non-modal windows; the only modal is the elevated warning before the

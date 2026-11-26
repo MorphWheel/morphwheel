@@ -6,6 +6,8 @@
   its own Analysis that excludes PySide6, so PyInstaller's PySide6 runtime hook never runs in a
   worker (S0 finding 1). Both share one ``_internal`` folder.
 - The builtin plugin's ``plugin.toml`` ships as a data file beside the code (read by path, R5).
+- The wheel's four Fluent icons (``ui/wheel/fluent/*.svg``, RD-36) ship the same way, read by path
+  through ``qsvg``. ``--worker-check`` fails if one doesn't load.
 
 S0 built the drag probe from this spec; the probe now runs from source only. S7 finalizes the spec:
 the icon (``assets/icon/morphwheel.ico``, rendered by ``tools/make_icon.py`` from the same painter
@@ -20,7 +22,8 @@ Build from the repo root::
 
 Then check the workers in the frozen build (A5a): ``dist\\morphwheel\\morphwheel.exe --worker-check``
 writes one line per worker to ``%LOCALAPPDATA%\\Morphwheel\\logs\\morphwheel.log`` with the worker's
-executable and ``qt_loaded``, and exits 0 only when every worker came up Qt-free.
+executable and ``qt_loaded``, and exits 0 only when every worker came up Qt-free and the wheel's
+icons load.
 """
 
 import os
@@ -74,6 +77,10 @@ DATAS = [
         "morphwheel/builtin/pillow_images",
     )
 ]
+FLUENT = SRC / "morphwheel" / "ui" / "wheel" / "fluent"
+if not any(FLUENT.glob("*.svg")):  # an empty glob would abort the build without a word on why
+    raise SystemExit(f"morphwheel.spec: the wheel's icons are missing from {FLUENT}")
+DATAS.append((str(FLUENT / "*.svg"), "morphwheel/ui/wheel/fluent"))  # RD-36
 DATAS += license_datas()  # S7: every runtime dependency's text, Python's, Qt's
 TRANSLATIONS = SRC / "morphwheel" / "i18n" / "translations"
 if any(TRANSLATIONS.glob("*.qm")):  # tools/translations.py release; an empty glob aborts

@@ -3,7 +3,8 @@
 Traceability (phase-4 §6): "alpha floor ≥ 1, no window opacity: offscreen render to QImage,
 including mid-fade frames; alpha ≥ 1 on the disc and the halo, 0 outside" (the renderer half; the
 window half is in ``test_wheel_window.py``); "the hub repeats the target under the cursor" (C5,
-hover render); High Contrast (C7); M2 check 6 (paint cost).
+hover render); High Contrast (C7); M2 check 6 (paint cost). The icons (phase-3 §7, RD-36) are
+drawn in every render here, so the floor and fade checks cover them too.
 """
 
 from __future__ import annotations
@@ -18,10 +19,12 @@ import pytest
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage, QPainter, QPalette
 
-from morphwheel.core.catalog import SlotPos
+from morphwheel.core.catalog import Catalog, SlotPos
+from morphwheel.core.formats import FormatId
 from morphwheel.core.geometry import MoreArc, WheelGeometry, polar
 from morphwheel.core.wheel_session import MORE_DWELL_NS, SessionView
 from morphwheel.ui.theme import Scheme, Theme
+from morphwheel.ui.wheel.glyphs import Glyph, GlyphSet
 from morphwheel.ui.wheel.renderer import (
     BULGE_PX,
     Content,
@@ -29,12 +32,14 @@ from morphwheel.ui.wheel.renderer import (
     HubText,
     WheelRenderer,
     blank_layer,
+    item_glyphs,
     item_labels,
+    slot_glyphs,
     slot_labels,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "unit"))
-from builtin_targets import TWO_PNG_PLUGINS, planned_session
+from builtin_targets import BUILTINS, TWO_PNG_PLUGINS, planned_session, plugin
 
 pytestmark = pytest.mark.usefixtures("qapp")
 
@@ -45,6 +50,7 @@ SIZE = QSize(WheelGeometry.for_size("L").window_size, WheelGeometry.for_size("L"
 DARK = Theme.build(Scheme.DARK, accent=QColor("#0078D4"))
 LIGHT = Theme.build(Scheme.LIGHT, accent=QColor("#0078D4"))
 MS = 1_000_000
+GLYPHS = GlyphSet()  # one set for the module, as the window holds one
 BESIDE = 14.0  # degrees off a slot's center: inside the wedge, clear of its label
 
 
@@ -72,7 +78,10 @@ def view_for(state: str) -> tuple[SessionView, MoreArc | None]:
 def content_for(state: str) -> tuple[Content, MoreArc | None]:
     view, arc = view_for(state)
     hub = HubText("→ JPG", "1 file") if state == "hover" else HubText("photo.png", "1 file")
-    return Content(view, hub, slot_labels(view.plan, "More"), item_labels(view.plan)), arc
+    if state == "halo":
+        hub = HubText("Cancel", glyph=Glyph.CANCEL)
+    labels, items = slot_labels(view.plan, "More"), item_labels(view.plan)
+    return Content(view, hub, labels, items, slot_glyphs(view.plan), item_glyphs(view.plan)), arc
 
 
 def render(
@@ -85,7 +94,7 @@ def render(
     renderer: WheelRenderer | None = None,
 ) -> QImage:
     image = blank_layer(SIZE, dpr)
-    r = renderer or WheelRenderer()
+    r = renderer or WheelRenderer(GLYPHS)
     p = QPainter(image)
     r.paint_floor(p, SIZE, geometry)
     r.paint_content(p, SIZE, dpr, theme, geometry, content, frame)
@@ -186,7 +195,7 @@ def test_the_hub_is_tinted_only_in_the_cancel_state() -> None:
     hover, _ = content_for("hover")
     assert near(at(render(DARK, waiting, Frame()), 0, 0), DARK.palette.surface, 24)
     assert near(at(render(DARK, hover, Frame()), 0, G.hub_r - 6), DARK.palette.surface, 24)
-    tinted = at(render(DARK, halo, Frame()), 0, G.hub_r - 6)  # "✕ Cancel": a touch of accent
+    tinted = at(render(DARK, halo, Frame()), 0, G.hub_r - 6)  # Cancel: a touch of accent
     assert not near(tinted, DARK.palette.surface, 24)
 
 
@@ -299,8 +308,9 @@ def test_the_layer_is_rebuilt_only_when_the_content_changes_and_reuses_its_buffe
 
 def test_paint_cost_at_150_percent(caplog: pytest.LogCaptureFixture) -> None:
     """A loose guard against a per-frame blur or a lost cache. The live number is the DEBUG line
-    the window logs when it hides (frames, mean, max); this is the raster side only (M2 check 6)."""
-    renderer = WheelRenderer()
+    the window logs when it hides (frames, mean, max); this is the raster side only (M2 check 6).
+    The icons are drawn (and tinted) in every rebuilt layer."""
+    renderer = WheelRenderer(GLYPHS)
     content, _ = content_for("hover")
     image = blank_layer(SIZE, 1.5)
     worst: list[float] = []
@@ -332,3 +342,116 @@ def test_paint_cost_at_150_percent(caplog: pytest.LogCaptureFixture) -> None:
     log.warning(msg)
     assert q(worst, n=20)[18] < 33.0, msg
     assert q(group, n=20)[18] < 33.0, msg
+
+
+# --------------------------------------------------------------------------- the icons (RD-36)
+
+
+def _ink_differs(a: QImage, b: QImage, angle: float, radius: float, half: float = 18.0) -> int:
+    """Pixels that differ in a box around a point (logical px), counted at the image's ratio."""
+    dpr = a.devicePixelRatio()
+    c = SIZE.width() / 2
+    pt = polar(angle, radius)
+    x0, y0 = int((c + pt.x - half) * dpr), int((c + pt.y - half) * dpr)
+    side = int(2 * half * dpr)
+    return sum(
+        1
+        for x in range(x0, x0 + side)
+        for y in range(y0, y0 + side)
+        if a.pixelColor(x, y) != b.pixelColor(x, y)
+    )
+
+
+def test_the_plan_gives_compress_pdf_and_more_their_icons() -> None:
+    view, _ = view_for("more-open")
+    assert slot_glyphs(view.plan) == {
+        SlotPos.S: Glyph.COMPRESS,
+        SlotPos.SW: Glyph.PDF,
+        SlotPos.NW: Glyph.MORE,
+    }
+    assert item_glyphs(view.plan) == (None, None)  # two PNG plugins: plain labels
+    assert slot_glyphs(None) == {}
+    assert item_glyphs(None) == ()
+
+
+@pytest.mark.parametrize("dpr", [1.0, 1.5])
+def test_icons_are_drawn_on_their_slots_only(dpr: float) -> None:
+    content, _ = content_for("armed")
+    mid = (G.slot_inner_r + G.slot_outer_r) / 2
+    with_icons = render(DARK, content, Frame(), dpr=dpr)
+    without = render(DARK, content, Frame(), dpr=dpr, renderer=WheelRenderer())  # the control
+    for slot, angle in ((SlotPos.S, 180.0), (SlotPos.SW, 225.0), (SlotPos.NW, 315.0)):
+        assert _ink_differs(with_icons, without, angle, mid) > 20, slot
+    for slot, angle in ((SlotPos.N, 0.0), (SlotPos.E, 90.0), (SlotPos.W, 270.0)):
+        assert _ink_differs(with_icons, without, angle, mid) == 0, slot  # labels alone, unmoved
+
+
+def test_icons_follow_the_labels_crossfade() -> None:
+    content, _ = content_for("armed")
+    mid = (G.slot_inner_r + G.slot_outer_r) / 2
+    skeleton = Frame(labels=0.0)
+    with_icons = render(DARK, content, skeleton)
+    without = render(DARK, content, skeleton, renderer=WheelRenderer())
+    assert _ink_differs(with_icons, without, 180.0, mid) == 0  # no icon before the labels
+
+
+def test_the_hub_shows_the_cancel_icon_above_its_text() -> None:
+    content, _ = content_for("halo")
+    with_icons = render(DARK, content, Frame())
+    without = render(DARK, content, Frame(), renderer=WheelRenderer())
+    assert _ink_differs(with_icons, without, 0.0, 0.0, half=G.hub_r - 4) > 20
+    plain = Content(content.view, HubText("Cancel"), content.labels, content.item_labels)
+    assert (
+        _ink_differs(render(DARK, plain, Frame()), without, 0.0, 0.0, half=G.hub_r - 4) == 0
+    )  # no icon asked for: the same hub as before
+
+
+def test_an_icon_that_will_not_load_leaves_the_label_alone(tmp_path: Path) -> None:
+    content, _ = content_for("armed")
+    mid = (G.slot_inner_r + G.slot_outer_r) / 2
+    broken = render(DARK, content, Frame(), renderer=WheelRenderer(GlyphSet(tmp_path)))
+    without = render(DARK, content, Frame(), renderer=WheelRenderer())
+    assert _ink_differs(broken, without, 180.0, mid) == 0  # the label where it always was
+
+
+def test_icons_take_the_disabled_color_with_their_label() -> None:
+    def brightest_icon_pixel(state: str) -> int:
+        content, _ = content_for(state)
+        image = render(DARK, content, Frame())
+        c = SIZE.width() / 2
+        pt = polar(180.0, (G.slot_inner_r + G.slot_outer_r) / 2)  # Compress
+        return max(
+            image.pixelColor(int(c + pt.x + dx), int(c + pt.y + dy)).lightness()
+            for dx in range(-8, 9)
+            for dy in range(-22, -4)  # above the label: the icon
+        )
+
+    # clip.mp4 disables every slot: the icon dims as its label does (text_disabled is translucent)
+    assert brightest_icon_pixel("not-supported") < brightest_icon_pixel("armed") - 40
+
+
+def test_a_pdf_target_in_the_more_arc_carries_its_icon() -> None:
+    pdf = plugin("pdfx", {FormatId.PNG}, output_format=FormatId.PDF)  # a plugin's PDF target
+    catalog = Catalog.of([*BUILTINS, plugin("p0", {FormatId.PNG}), pdf])
+    s = planned_session(catalog, ("a.png",), G)
+    s.on_pointer(polar(315, 80), 10 * MS)
+    view = s.tick(10 * MS + MORE_DWELL_NS)
+    assert view.more_arc is not None
+    glyphs = item_glyphs(view.plan)
+    assert Glyph.PDF in glyphs
+    assert glyphs.count(None) == len(glyphs) - 1  # the PNG plugins stay plain
+    content = Content(
+        view,
+        HubText("More"),
+        slot_labels(view.plan, "More"),
+        item_labels(view.plan),
+        slot_glyphs(view.plan),
+        glyphs,
+    )
+    frame = Frame(arc=view.more_arc, more_arc=1.0)
+    with_icons = render(DARK, content, frame)
+    without = render(DARK, content, frame, renderer=WheelRenderer())
+    mid = (G.more_inner_r + G.more_outer_r) / 2
+    for index, glyph in enumerate(glyphs):
+        differs = _ink_differs(with_icons, without, view.more_arc.item_angle(index), mid, half=14)
+        assert (differs > 20) is (glyph is not None), index

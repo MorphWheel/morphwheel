@@ -19,6 +19,7 @@ build ships.
 | Pillow | 13.0.0 | MIT-CMU (HPND) | `licenses\pillow-13.0.0\LICENSE`, which also carries the texts of the libraries compiled into it (next section) |
 | platformdirs | 4.13.4 | MIT | `licenses\platformdirs-4.13.4\LICENSE` |
 | tomli-w | 1.2.0 | MIT | `licenses\tomli-w-1.2.0\LICENSE` |
+| Fluent UI System Icons (four icons on the wheel: Arrow Minimize, Document PDF, More Horizontal, Dismiss; 20 px regular) | commit a3de632 of microsoft/fluentui-system-icons | MIT | `licenses\fluentui-system-icons\LICENSE.txt` |
 
 ### Inside Python's Windows build
 
@@ -122,5 +123,6 @@ itself stays MIT. The download's own license texts are inside that wheel.
 ## Morphwheel's own assets
 
 The app icon, the wheel, the UI and the translations are Morphwheel's own work, under the MIT
-License. No third-party fonts or icon sets are bundled; text is rendered with the fonts Windows
-provides.
+License. No third-party fonts are bundled; text is rendered with the fonts Windows provides. The
+only third-party icons are the four Fluent UI System Icons on the wheel (Microsoft, MIT, listed
+under *Runtime*), shipped unchanged in `_internal\morphwheel\ui\wheel\fluent\`.
