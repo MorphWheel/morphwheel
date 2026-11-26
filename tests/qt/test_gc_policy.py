@@ -59,7 +59,9 @@ class Cycle(QObject):
         super().__init__()
         self.me = self  # only the cyclic GC can free it
         self.timer = QTimer(self)
-        self.timer.setInterval(8)
+        # Over 20 ms: Windows then runs it as a plain timer. A faster one is a multimedia timer,
+        # whose thread can hang the process at exit once its object is freed (seen 1 in 8).
+        self.timer.setInterval(1000)
         self.timer.start()
 
 
