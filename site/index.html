@@ -6,6 +6,7 @@
   <title>Morphwheel: free drag-and-drop image converter for Windows</title>
   <meta name="description" content="Shift-drag an image in File Explorer and drop it on JPG, PNG, WebP, AVIF, PDF or ICO. The copy lands next to the original. Free, open source, offline.">
   <link rel="canonical" href="https://morphwheel.yuvalrahamim.com/">
+  <meta name="author" content="Yuval Rahamim">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#0c0c0d" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#fbfbfa" media="(prefers-color-scheme: light)">
@@ -40,6 +41,12 @@
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
     "license": "https://opensource.org/licenses/MIT",
     "codeRepository": "https://github.com/MorphWheel/morphwheel",
+    "author": {
+      "@type": "Person",
+      "name": "Yuval Rahamim",
+      "url": "https://yuvalrahamim.com/",
+      "sameAs": ["https://www.linkedin.com/in/yuvalra/"]
+    },
     "image": "https://morphwheel.yuvalrahamim.com/assets/og.png",
     "featureList": [
       "Convert images to JPG, PNG, WebP, AVIF, PDF or ICO from File Explorer",
@@ -57,16 +64,18 @@
     "@context": "https://schema.org",
     "@type": "FAQPage",
     "mainEntity": [
-      { "@type": "Question", "name": "Is Morphwheel free?",
+      { "@type": "Question", "name": "Is it free?",
         "acceptedAnswer": { "@type": "Answer", "text": "Yes. Morphwheel is free and open source under the MIT license, with no trial, no account and no ads." } },
-      { "@type": "Question", "name": "Does Morphwheel upload my files?",
-        "acceptedAnswer": { "@type": "Answer", "text": "No. Conversions run on your PC and nothing is sent anywhere. The only network request is the optional HEIC support download, and only if you choose to install it." } },
-      { "@type": "Question", "name": "Which versions of Windows does Morphwheel support?",
+      { "@type": "Question", "name": "Does it upload my files?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. Conversions run on your PC and nothing is sent anywhere. The only network request is the optional HEIC download, and only if you choose to install it." } },
+      { "@type": "Question", "name": "Which Windows versions does it run on?",
         "acceptedAnswer": { "@type": "Answer", "text": "Windows 11, 64-bit. Windows 10 22H2 is best-effort. The installer needs no administrator rights." } },
-      { "@type": "Question", "name": "Can Morphwheel convert HEIC photos from an iPhone?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Yes, after a one-time optional download of the HEIC engine from Settings. It is not bundled because its codecs are GPL-licensed." } },
+      { "@type": "Question", "name": "Can it convert HEIC photos from an iPhone?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes, after a one-time optional download of the HEIC engine from Settings. It isn't bundled because its codecs are GPL-licensed." } },
       { "@type": "Question", "name": "Can I use a key other than Shift?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Yes. The trigger can be Shift, Ctrl or Ctrl+Shift, and the wheel comes in three sizes." } }
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. The trigger can be Shift, Ctrl or Ctrl+Shift, and the wheel comes in three sizes." } },
+      { "@type": "Question", "name": "Can I add more formats?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes, with plugins written in Python. They appear in the wheel's More slice. The plugin guide has a complete converter in about thirty lines." } }
     ]
   }
   </script>
@@ -74,23 +83,25 @@
 <body>
   <a class="skip" href="#main">Skip to content</a>
 
-  <header class="top wrap">
-    <a class="brand" href="/">
-      <img src="assets/icon.svg" alt="" width="24" height="24">
-      Morphwheel
-    </a>
-    <nav aria-label="Main">
-      <a href="#faq">FAQ</a>
-      <a href="https://github.com/MorphWheel/morphwheel">GitHub</a>
-      <a class="pill" href="https://github.com/MorphWheel/morphwheel/releases/latest">Download</a>
-    </nav>
+  <header class="top">
+    <div class="top-in wrap">
+      <a class="brand" href="/">
+        <img src="assets/icon.svg" alt="" width="24" height="24">
+        Morphwheel
+      </a>
+      <nav aria-label="Main">
+        <a href="#faq">FAQ</a>
+        <a class="wide-only" href="https://github.com/MorphWheel/morphwheel">GitHub</a>
+        <a class="pill" href="https://github.com/MorphWheel/morphwheel/releases/latest">Download</a>
+      </nav>
+    </div>
   </header>
 
   <main id="main">
     <section class="hero wrap">
       <h1>Drag. Shift. Drop.</h1>
       <p class="lede">
-        Convert images without leaving File Explorer. Press Shift mid-drag, drop the file on a
+        Convert images without leaving File Explorer. Press Shift mid&#8209;drag, drop the file on a
         format, and the converted copy appears right next to the original.
       </p>
       <div class="actions">
@@ -173,28 +184,34 @@
     <section class="facts wrap" aria-labelledby="facts-title">
       <h2 id="facts-title" class="sr-only">Features</h2>
       <div>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.4 3 8.2 7 9.5 4-1.3 7-5.1 7-9.5V6Z"/><path d="m9 12 2 2 4-4"/></svg>
         <h3>Originals stay untouched</h3>
         <p>Every drop is a copy. Morphwheel never moves, overwrites or deletes a source file, and
           checks it after each conversion.</p>
       </div>
       <div>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
         <h3>Works offline</h3>
         <p>Your images never leave your PC. No uploads, no account, no telemetry.</p>
       </div>
       <div>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
         <h3>One-click undo</h3>
         <p>Changed your mind? Undo in the notification sends the new file to the Recycle Bin.</p>
       </div>
       <div>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 13 9 5 9-5"/></svg>
         <h3>Whole selections</h3>
         <p>Drop many files at once. Formats that can't take them are dimmed, and the wheel says
           why.</p>
       </div>
       <div>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>
         <h3>iPhone photos too</h3>
         <p>HEIC and HEIF open after an optional one-time download, right from Settings.</p>
       </div>
       <div>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path class="solid" d="M12 3.5a8.5 8.5 0 0 1 0 17Z"/></svg>
         <h3>At home in Windows</h3>
         <p>Follows your light or dark theme, accent color, High Contrast and animation settings.</p>
       </div>
@@ -237,6 +254,11 @@
           rights.</p>
       </details>
       <details>
+        <summary>Can it convert HEIC photos from an iPhone?</summary>
+        <p>Yes, after a one-time optional download of the HEIC engine from Settings. It isn't
+          bundled because its codecs are GPL-licensed.</p>
+      </details>
+      <details>
         <summary>Can I use a key other than Shift?</summary>
         <p>Yes. The trigger can be Shift, Ctrl or Ctrl+Shift, and the wheel comes in three sizes.</p>
       </details>
@@ -250,7 +272,14 @@
   </main>
 
   <footer class="foot wrap">
-    <span>Morphwheel · MIT license</span>
+    <div class="credit">
+      <p class="maker">Made by <a href="https://yuvalrahamim.com/" rel="author">Yuval Rahamim</a></p>
+      <p class="maker-links">
+        <a href="https://yuvalrahamim.com/">yuvalrahamim.com</a>
+        <a href="https://yuvalrahamim.com/linkedin" rel="me">LinkedIn</a>
+      </p>
+      <p>Morphwheel · MIT license</p>
+    </div>
     <nav aria-label="Project">
       <a href="https://github.com/MorphWheel/morphwheel/blob/main/CHANGELOG.md">Changelog</a>
       <a href="https://github.com/MorphWheel/morphwheel/blob/main/PRIVACY.md">Privacy</a>

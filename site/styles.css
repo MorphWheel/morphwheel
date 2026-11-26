@@ -1,5 +1,9 @@
 /* Morphwheel site: one static page, no scripts. Dark by default, light follows the OS.
-   The demo is one 10 s CSS timeline; every animated part uses --T and the same percentages. */
+   The demo is one 10 s CSS timeline; every animated part uses the same percentages.
+   The rest of the motion is CSS too (the CSP allows no script): smooth anchor scrolling, the
+   hero's entrance, sections that rise in as they scroll into view, and the FAQ's opening and
+   closing. All of it is off under prefers-reduced-motion, and every part degrades to a static
+   page where a browser lacks the feature (scroll-driven animations, interpolate-size). */
 
 :root {
   --bg: #0c0c0d;
@@ -8,6 +12,9 @@
   --line: #222225;
   --accent: #0078d4;
   --accent-text: #fff;
+  --accent-soft: #4cc2ff; /* icons on the dark background */
+  --header-h: 64px;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
   --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --display: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
@@ -32,6 +39,7 @@
     --muted: #6b6b70;
     --line: #e6e6e3;
     --accent: #0067c0;
+    --accent-soft: #0067c0;
 
     --desk: #e9ecef;
     --win: #f9f9f9;
@@ -54,6 +62,18 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  scroll-padding-top: calc(var(--header-h) + 0.5rem); /* anchors land below the sticky header */
+  interpolate-size: allow-keywords; /* lets the FAQ animate to its content's height */
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 body {
@@ -82,6 +102,14 @@ h2 {
 
 p {
   margin: 0;
+  text-wrap: pretty;
+}
+
+h1,
+h2,
+h3,
+.lede {
+  text-wrap: balance;
 }
 
 code {
@@ -104,6 +132,7 @@ code {
 
 .skip {
   position: absolute;
+  z-index: 20; /* above the sticky header */
   inset-inline-start: 1rem;
   top: -3rem;
   padding: 0.5rem 1rem;
@@ -119,10 +148,35 @@ code {
 /* ------------------------------------------------------------------ header */
 
 .top {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  backdrop-filter: saturate(1.4) blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+
+/* Where scroll-driven animations exist, the header's line appears only once the page scrolls. */
+@supports (animation-timeline: scroll()) {
+  .top {
+    animation: header-line linear both;
+    animation-timeline: scroll();
+    animation-range: 0 64px;
+  }
+
+  @keyframes header-line {
+    from { border-bottom-color: transparent; }
+    to { border-bottom-color: var(--line); }
+  }
+}
+
+.top-in {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 72px;
+  gap: 1rem;
+  height: var(--header-h);
 }
 
 .brand {
@@ -155,6 +209,12 @@ code {
   padding: 0.35rem 0.9rem;
   border: 1px solid var(--line);
   border-radius: 999px;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+.top nav .pill:hover {
+  border-color: var(--muted);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 /* ------------------------------------------------------------------ hero */
@@ -195,11 +255,19 @@ h1 {
   color: var(--accent-text);
   font-weight: 600;
   text-decoration: none;
-  transition: filter 0.15s;
+  transition: filter 0.15s, transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out);
 }
 
 .button:hover {
   filter: brightness(1.12);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px -8px color-mix(in srgb, var(--accent) 75%, transparent);
+}
+
+.button:active {
+  filter: brightness(0.96);
+  transform: translateY(0) scale(0.98);
+  box-shadow: none;
 }
 
 .link {
@@ -685,6 +753,23 @@ h1 {
   border-top: 1px solid var(--line);
 }
 
+.facts .icon {
+  display: block;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-bottom: 0.85rem;
+  fill: none;
+  stroke: var(--accent-soft);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.facts .icon .solid {
+  fill: var(--accent-soft);
+  stroke: none;
+}
+
 .facts h3 {
   margin-top: 0;
   font-family: var(--display);
@@ -786,15 +871,22 @@ h1 {
   list-style: none;
 }
 
+.faq summary:hover::after {
+  color: var(--text);
+}
+
 .faq summary::-webkit-details-marker {
   display: none;
 }
 
 .faq summary::after {
   content: "+";
+  flex: none;
   color: var(--muted);
-  font-weight: 400;
-  transition: rotate 0.2s;
+  font-size: 1.25em;
+  font-weight: 300;
+  line-height: 1.2;
+  transition: rotate 0.3s var(--ease-out), color 0.15s;
 }
 
 .faq details[open] summary::after {
@@ -814,6 +906,25 @@ h1 {
 
 .faq a {
   color: var(--text);
+}
+
+/* Opening and closing slide: the answer's box animates between 0 and its own height (Chromium;
+   elsewhere it opens at once). */
+@supports (interpolate-size: allow-keywords) {
+  .faq details::details-content {
+    block-size: 0;
+    opacity: 0;
+    overflow-y: clip;
+    transition:
+      block-size 0.35s var(--ease-out),
+      opacity 0.3s ease,
+      content-visibility 0.35s allow-discrete;
+  }
+
+  .faq details[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+  }
 }
 
 /* ------------------------------------------------------------------ footer */
@@ -843,6 +954,38 @@ h1 {
   color: var(--text);
 }
 
+.credit {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.credit p {
+  margin: 0;
+}
+
+.maker {
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.maker a {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--muted);
+  text-underline-offset: 0.2em;
+}
+
+.maker a:hover {
+  text-decoration-color: currentColor;
+}
+
+.maker-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.3rem;
+}
+
 /* ------------------------------------------------------------------ 404 */
 
 .not-found {
@@ -863,6 +1006,14 @@ h1 {
 }
 
 @media (max-width: 560px) {
+  .top nav {
+    gap: 1rem;
+  }
+
+  .wide-only {
+    display: none; /* GitHub: also "View source" in the hero and the footer */
+  }
+
   .facts {
     grid-template-columns: 1fr;
   }
@@ -878,6 +1029,57 @@ h1 {
   .formats p {
     grid-template-columns: 1fr;
     margin-bottom: 0.6rem;
+  }
+}
+
+/* Bigger targets for fingers: the small text links get vertical padding. */
+@media (pointer: coarse) {
+  .top nav a:not(.pill),
+  .foot a,
+  .link {
+    padding-block: 0.6rem;
+  }
+}
+
+/* ------------------------------------------------------------------ motion
+   The hero rises in on load; the sections below rise in as they scroll into view. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero > *,
+  .demo-wrap {
+    animation: rise 0.8s var(--ease-out) both;
+  }
+
+  .hero > :nth-child(2) { animation-delay: 0.08s; }
+  .hero > :nth-child(3) { animation-delay: 0.16s; }
+  .hero > :nth-child(4) { animation-delay: 0.22s; }
+  .demo-wrap { animation-delay: 0.3s; }
+
+  @supports (animation-timeline: view()) {
+    .facts > div,
+    .formats p,
+    .install > *,
+    .faq h2,
+    .faq details,
+    .foot > * {
+      animation: rise linear both;
+      animation-timeline: view();
+      animation-range: entry 5% entry 50%;
+    }
+
+    .facts > div:nth-child(3n + 2) { animation-range: entry 10% entry 55%; }
+    .facts > div:nth-child(3n) { animation-range: entry 15% entry 60%; }
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    translate: 0 1.5rem;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
   }
 }
 
@@ -920,9 +1122,34 @@ h1 {
     transition: none;
   }
 
+  .faq details::details-content {
+    transition: none;
+  }
+
   .button,
   .link,
   .top nav a {
     transition: none;
+  }
+
+  .button:hover,
+  .button:active {
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------------------------ print
+   No scrolling and no clock: every element at rest, fully visible. */
+
+@media print {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .top {
+    position: static;
   }
 }

@@ -6,7 +6,7 @@ no cookies and no analytics.
 
 | File | What it is |
 |---|---|
-| `site/index.html` | The page: the headline, the demo (with a pause toggle), the features, the formats, install, the FAQ. The `<head>` holds the search and share metadata and two JSON-LD blocks (`SoftwareApplication`, `FAQPage`) |
+| `site/index.html` | The page: the headline, the demo (with a pause toggle), the features, the formats, install, the FAQ, and the footer with the maker's credit (Yuval Rahamim, linked to yuvalrahamim.com and LinkedIn). The `<head>` holds the search and share metadata (`author` included) and two JSON-LD blocks (`SoftwareApplication`, with its `author`, and `FAQPage`) |
 | `site/styles.css` | All styles and the demo's timeline. Dark by default, light when the OS prefers it |
 | `site/404.html` | The page Pages serves for an unknown path |
 | `site/robots.txt`, `site/sitemap.xml` | Allow every crawler; the one-page sitemap |
@@ -30,12 +30,34 @@ one picture. With reduced motion the loop stops on the moment before the drop.
 The page links to `releases/latest` and never names a version, so a release needs no site change.
 Keep its claims in step with `README.md`: the promises, the formats, the install notes.
 
+## Motion and layout
+
+Everything moves with CSS alone: the CSP allows no script.
+
+- **Smooth scrolling** for the page's own links (`scroll-behavior`), landing below the header
+  (`scroll-padding-top`).
+- **A sticky header**, translucent with a blur. Its bottom line fades in once the page scrolls (a
+  scroll-driven animation; where those aren't supported the line is always there). On phones
+  (560 px and narrower) the GitHub link is hidden: the hero and the footer link the repository too.
+- **The hero rises in on load**, line by line, then the demo.
+- **Sections rise in as they scroll into view** (`animation-timeline: view()`): the features (a
+  slight stagger across each row), the formats, install, the FAQ and the footer. Where
+  scroll-driven animations aren't supported, everything is simply visible.
+- **The FAQ slides open and closed** (`::details-content` with `interpolate-size`), and its `+`
+  turns into a `×`. Browsers without `interpolate-size` open the answer at once.
+- **Buttons lift on hover and press on click.** Touch screens get taller text links
+  (`pointer: coarse`).
+- **Reduced motion** (Windows' "Animation effects" off) turns all of it off, the demo included.
+  Printing turns every animation off too.
+
+Each feature has a small stroked icon (inline SVG, no image request), in the accent color.
+
 ## Search and answer engines
 
 - **Title and description** carry what people search for ("image converter", "Windows", "File
   Explorer", the formats), and stay under about 60 and 155 characters.
 - **The FAQ is written twice:** once as the visible `<details>` list and once as the `FAQPage`
-  JSON-LD in `<head>`. Change both together; search engines expect them to match.
+  JSON-LD in `<head>`. Change both together, word for word; search engines expect them to match.
 - **The `SoftwareApplication` block** states the facts an answer engine looks for: free, MIT, the
   Windows versions, the download, the repository, the features. It names no version.
 - **Not on the page, on purpose:** the winget command (add it to the install section once the
