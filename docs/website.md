@@ -10,7 +10,7 @@ no cookies and no analytics.
 | `site/styles.css` | All styles and the demo's timeline. Dark by default, light when the OS prefers it |
 | `site/404.html` | The page Pages serves for an unknown path |
 | `site/robots.txt`, `site/sitemap.xml` | Allow every crawler; the one-page sitemap |
-| `site/_headers` | Response headers for Pages: a strict Content-Security-Policy (no inline styles or scripts), `nosniff`, the referrer and permissions policies, a week's cache on `assets/` |
+| `site/_headers` | Response headers for Pages: a strict Content-Security-Policy (no inline styles or scripts), `nosniff`, HSTS (a year, subdomains included), the referrer and permissions policies, a week's cache on `assets/` |
 | `site/assets/wheel-idle-*.webp`, `wheel-jpg-*.webp` | The wheel at size M, light and dark: as it opens over `lake.png`, and with JPG hovered. Drawn by the app's renderer |
 | `site/assets/toast-*.webp` | The success toast (`Converted to JPG`), light and dark: the app's own `ToastWidget`, rendered |
 | `site/assets/thumb-*.webp` | The demo's four Explorer thumbnails (drawn scenes, 192 by 144) |

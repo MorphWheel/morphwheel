@@ -105,7 +105,8 @@ Building the installer: `pyinstaller packaging/pyinstaller/morphwheel.spec`, the
 `ISCC.exe packaging\inno\morphwheel.iss` (Inno Setup 6.3 or later). The release workflow in
 `.github/workflows/release.yml` does the same on a tag.
 
-Design documents, decisions and progress are in [`docs/`](docs/README.md).
+To contribute, read [`CONTRIBUTING.md`](CONTRIBUTING.md) and the
+[code of conduct](CODE_OF_CONDUCT.md). Design documents, decisions and progress are in [`docs/`](docs/README.md).
 
 ## License
 

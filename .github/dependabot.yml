@@ -1,0 +1,12 @@
+# Keeps the workflows' actions current. Updates keep each action pinned to a full commit SHA.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "CI"

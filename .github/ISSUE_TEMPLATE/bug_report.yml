@@ -1,0 +1,71 @@
+name: Bug report
+description: Something doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If Morphwheel changed, moved or deleted one of your files, please
+        don't use this form: report it privately (see SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Morphwheel version
+      description: Shown in Settings, on the About page.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Press Win+R, type winver, and copy the version and build.
+      placeholder: "Windows 11 24H2 (build 26100)"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you installed it
+      options:
+        - The installer from the Releases page
+        - winget
+        - From source
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The steps that lead to the problem, including the file type you dragged.
+      placeholder: |
+        1. Dragged a .png file in File Explorer
+        2. Pressed Shift
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        The log is in %LOCALAPPDATA%\Morphwheel\logs. Paste the lines around the problem; check them
+        first for file names or paths you'd rather not share.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Screen scaling, multiple monitors, Remote Desktop, antivirus, plugins you enabled.

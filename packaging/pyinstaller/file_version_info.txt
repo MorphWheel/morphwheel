@@ -19,7 +19,7 @@ VSVersionInfo(
         StringStruct('FileDescription', 'Morphwheel'),
         StringStruct('FileVersion', '0.1.0.0'),
         StringStruct('InternalName', 'morphwheel'),
-        StringStruct('LegalCopyright', 'Copyright (c) 2026 Morphwheel contributors. MIT License.'),
+        StringStruct('LegalCopyright', 'Copyright (c) 2026 Yuval Rahamim and Morphwheel contributors. MIT License.'),
         StringStruct('OriginalFilename', 'morphwheel.exe'),
         StringStruct('ProductName', 'Morphwheel'),
         StringStruct('ProductVersion', '0.1.0')

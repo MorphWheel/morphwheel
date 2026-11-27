@@ -11,7 +11,7 @@ PackageName: Morphwheel
 PackageUrl: https://github.com/MorphWheel/morphwheel
 License: MIT
 LicenseUrl: https://github.com/MorphWheel/morphwheel/blob/v@{version}/LICENSE
-Copyright: Copyright (c) 2026 Morphwheel contributors. MIT License.
+Copyright: Copyright (c) 2026 Yuval Rahamim and Morphwheel contributors. MIT License.
 ShortDescription: Shift-drag a file in Windows File Explorer, drop it on a radial wheel, get it converted.
 Description: |-
   Morphwheel converts files from File Explorer. Start dragging a file, press Shift, and a radial
